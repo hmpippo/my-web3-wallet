@@ -10,8 +10,8 @@ describe("home page shell", () => {
     expect(markup).toContain("Create a wallet");
     expect(markup).toContain("Import a wallet");
     expect(markup).toContain("Unlock wallet");
-    expect(markup).toContain(
-      "This project is a UI skeleton. No wallet is created, stored, or unlocked yet.",
-    );
+    expect(markup).toContain("Create wallet");
+    expect(markup).toContain("Import wallet");
+    expect(markup).toContain("Never enter a recovery phrase you use for real funds.");
   });
 });

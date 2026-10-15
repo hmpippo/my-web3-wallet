@@ -57,6 +57,23 @@ describe("WalletService", () => {
     );
   });
 
+  it("exposes immutable state and notifies subscribers on transitions", async () => {
+    const service = new WalletService({ storage: createStorage().storage });
+    const listener = vi.fn();
+    const unsubscribe = service.subscribe(listener);
+    const lockedState = service.getState();
+
+    expect(Object.isFrozen(lockedState)).toBe(true);
+    await service.importWallet(TEST_MNEMONIC, "correct horse");
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(service.getState().isUnlocked).toBe(true);
+
+    service.lock();
+    expect(listener).toHaveBeenCalledTimes(2);
+    expect(service.getState()).toEqual({ isUnlocked: false, address: null });
+    unsubscribe();
+  });
+
   it("clears the prepared recovery phrase when locked", async () => {
     const { storage } = createStorage();
     const service = new WalletService({ storage });

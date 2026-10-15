@@ -13,8 +13,8 @@ import { storageService, type StorageService } from "@/core/storage";
 import { sendNativeTransfer } from "./transaction-service";
 
 export interface WalletState {
-  isUnlocked: boolean;
-  address: Address | null;
+  readonly isUnlocked: boolean;
+  readonly address: Address | null;
 }
 
 export interface PreparedWallet {
@@ -37,10 +37,14 @@ interface PendingWallet extends PreparedWallet {
 
 export class WalletService {
   private privateKey: Hex | null = null;
-  private address: Address | null = null;
+  private state: WalletState = Object.freeze({
+    isUnlocked: false,
+    address: null,
+  });
   private pendingWallet: PendingWallet | null = null;
   private operationVersion = 0;
   private walletCreationInProgress = false;
+  private readonly listeners = new Set<() => void>();
   private readonly storage: StorageService;
   private readonly sendTransfer: NonNullable<
     WalletServiceDependencies["sendTransfer"]
@@ -52,15 +56,17 @@ export class WalletService {
   }
 
   get isUnlocked(): boolean {
-    return this.privateKey !== null;
+    return this.state.isUnlocked;
   }
 
   getState(): WalletState {
-    return {
-      isUnlocked: this.isUnlocked,
-      address: this.address,
-    };
+    return this.state;
   }
+
+  subscribe = (listener: () => void): (() => void) => {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  };
 
   async prepareWallet(): Promise<PreparedWallet> {
     this.assertNoWalletCreationInProgress();
@@ -109,7 +115,7 @@ export class WalletService {
       this.assertOperationCurrent(operationVersion);
 
       this.privateKey = pendingWallet.privateKey;
-      this.address = pendingWallet.address;
+      this.updateState(true, pendingWallet.address);
       this.pendingWallet = null;
       return {
         mnemonic: pendingWallet.mnemonic,
@@ -144,7 +150,7 @@ export class WalletService {
     this.assertOperationCurrent(operationVersion);
 
     this.privateKey = account.privateKey;
-    this.address = account.address;
+    this.updateState(true, account.address);
     return account.address;
   }
 
@@ -167,18 +173,18 @@ export class WalletService {
     const account = await deriveAccountFromMnemonic(mnemonic);
     this.assertOperationCurrent(operationVersion);
     this.privateKey = account.privateKey;
-    this.address = account.address;
+    this.updateState(true, account.address);
   }
 
   lock(): void {
     this.operationVersion += 1;
     this.privateKey = null;
-    this.address = null;
+    this.updateState(false, null);
     this.pendingWallet = null;
   }
 
   getAddress(): Address | null {
-    return this.address;
+    return this.state.address;
   }
 
   async signAndSendTransaction(tx: {
@@ -202,6 +208,17 @@ export class WalletService {
     if (this.walletCreationInProgress) {
       throw new Error("Wallet creation is already in progress");
     }
+  }
+
+  private updateState(isUnlocked: boolean, address: Address | null): void {
+    if (
+      this.state.isUnlocked === isUnlocked &&
+      this.state.address === address
+    ) {
+      return;
+    }
+    this.state = Object.freeze({ isUnlocked, address });
+    for (const listener of this.listeners) listener();
   }
 }
 
