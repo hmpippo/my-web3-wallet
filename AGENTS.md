@@ -25,7 +25,7 @@
 | 锁定钱包 | P0 | 清除内存中的私钥 |
 
 ### 1.3 明确不在 MVP 范围（Non-Goals）
-- 多链支持（只做一条 EVM 链，推荐 Base Sepolia 或 Sepolia 测试网）
+- 多链支持（只做一条 EVM 链，推荐 Sepolia 测试网）
 - Swap / Bridge / NFT 展示
 - WalletConnect / dApp 浏览器
 - MPC / Account Abstraction / Social Login
@@ -257,10 +257,10 @@ async function getTransactionHistory(address: `0x${string}`): Promise<any[]>; //
 
 ```typescript
 export const CHAIN = {
-  id: 84532, // Base Sepolia 示例，可改成 11155111 (Sepolia)
-  name: "Base Sepolia",
+  id: 11155111, // Sepolia
+  name: "Sepolia",
   rpcUrls: {
-    default: { http: ["https://sepolia.base.org"] },
+    default: { http: ["https://ethereum-sepolia-rpc.publicnode.com"] },
   },
   nativeCurrency: {
     name: "Ether",
@@ -268,7 +268,7 @@ export const CHAIN = {
     decimals: 18,
   },
   blockExplorers: {
-    default: { name: "Basescan", url: "https://sepolia.basescan.org" },
+    default: { name: "Etherscan", url: "https://sepolia.etherscan.io" },
   },
 } as const;
 ```
@@ -395,6 +395,12 @@ src/
 - 移动端适配（React Native）
 
 ---
+
+## 11. 运行时验证（重要）
+
+**After every edit, verify the page still works at runtime using the next-dev-loop skill.**
+
+不要假设“改完代码 = 页面正常”。每次修改组件或样式后，必须通过 `next-dev-loop` Skill 验证页面在浏览器中的实际渲染效果。该 Skill 会同时检查框架侧（编译错误、路由）和浏览器侧（控制台、DOM、网络请求），确保改动没有破坏运行时表现。
 
 **文档结束**
 

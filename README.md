@@ -1,8 +1,8 @@
 # My Wallet
 
-A client-side, non-custodial EVM wallet MVP. The current version is the app
-shell only: wallet creation, recovery, key handling, storage, balances, and
-transactions are intentionally not implemented yet.
+A client-side, non-custodial EVM wallet MVP. The project currently has a
+presentational app shell and isolated Core primitives. Wallet lifecycle,
+account state, balances, and transaction flows are not connected yet.
 
 ## Development
 
@@ -19,13 +19,17 @@ Open [http://localhost:3000](http://localhost:3000) to view the app.
 
 - `src/app/` — entry, wallet preview, and send preview routes
 - `src/components/` — shared presentational UI
-- `src/core/` — reserved for wallet primitives
-- `src/services/` — reserved for wallet and chain services
-- `src/store/` — reserved for in-memory UI state
-- `src/types/` and `src/lib/` — reserved for shared types and utilities
+- `src/core/hd-wallet.ts` — BIP-39 mnemonics and BIP-32 account derivation
+- `src/core/crypto.ts` — PBKDF2 (600,000 iterations) and AES-GCM vault encryption
+- `src/core/storage.ts` — encrypted-vault-only browser storage
+- `src/core/chain.ts` — Sepolia chain and viem public client
+- `src/services/`, `src/store/`, `src/types/`, `src/lib/` — reserved for follow-up
+  service, state, and shared utility work
 
-Core-layer work will be added in a later step. Do not treat the preview pages as
-functional wallet operations.
+The preview pages do not call these Core primitives and do not create, unlock,
+or send from a wallet. `localStorage` is only used for the encrypted vault
+format; mnemonic/private-key lifecycle management will be implemented in a
+later step.
 
 ## Checks
 
