@@ -420,6 +420,45 @@ input {
   color: var(--foreground);
 }
 
+.password-input-wrapper {
+  position: relative;
+  display: block;
+}
+
+.password-input-wrapper input {
+  padding-right: 3rem;
+}
+
+.password-visibility {
+  position: absolute;
+  top: 50%;
+  right: 0.7rem;
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  place-items: center;
+  transform: translateY(-50%);
+  border: 0;
+  border-radius: 0.4rem;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.password-visibility:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.password-visibility:focus-visible {
+  outline: 3px solid rgb(20 107 75 / 18%);
+}
+
+.password-visibility svg {
+  width: 1.2rem;
+  height: 1.2rem;
+}
+
 .form-field textarea {
   min-height: 7rem;
   resize: vertical;
