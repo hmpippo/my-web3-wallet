@@ -1,7 +1,8 @@
 # My Wallet
 
 A client-side, non-custodial EVM wallet MVP. The app includes wallet setup,
-import, unlock, balance, and native-transfer flows for Sepolia testnet.
+import, unlock, balance, native-transfer, and paginated transaction-history
+flows for Sepolia testnet.
 
 ## Development
 
@@ -25,6 +26,8 @@ Open [http://localhost:3000](http://localhost:3000) to view the app.
 - `src/services/wallet-service.ts` — create, import, unlock, lock, and send lifecycle
 - `src/services/transaction-service.ts` — estimated-gas native transfers with viem
 - `src/services/balance-service.ts` — native Sepolia balance reads
+- `src/services/etherscan-history.ts` — server-only Etherscan V2 activity adapter
+- `src/app/api/transactions/route.ts` — validated same-origin history endpoint
 - `src/store/`, `src/types/`, `src/lib/` — reserved for follow-up state and shared utilities
 
 Wallet creation displays a recovery phrase before asking the user to confirm
@@ -34,6 +37,32 @@ private key and address, including on page unload. Native transfers show an
 estimated fee before confirmation. The browser UI is still a self-custody
 wallet MVP: use Sepolia testnet only, and never enter a recovery phrase used
 for real funds.
+
+## Transaction history
+
+The wallet dashboard loads normal ETH transactions, internal ETH transfers,
+and ERC-20 transfers from Etherscan API V2 on Sepolia. Results from the three
+independent sources are merged newest-first and paginated without exposing the
+API key to browser code. NFT activity and token holdings are not included.
+The server pins the current Sepolia block height into the signed pagination
+cursor, so new blocks do not shift the upstream offset pages mid-session.
+
+Set `ETHERSCAN_API_KEY` in the repository's ignored `.env` file for local
+development, and provide the same server-only environment variable in
+deployment. Do not prefix it with `NEXT_PUBLIC_`. Only the public wallet address
+and signed continuation cursor are sent to the app's history route; wallet
+mnemonics and private keys are never sent. The server route requires a running
+Next.js server and does not work as a static export.
+
+The free Etherscan tier lists Sepolia as supported and allows up to 3 API calls
+per second and 100,000 calls per day. A history page may request one page from
+each activity source; provider limits or outages are shown as retryable errors.
+If the server cannot reach Etherscan directly, enable Node's environment proxy
+support when starting the dev server, for example:
+
+```bash
+NODE_USE_ENV_PROXY=1 HTTPS_PROXY=http://127.0.0.1:7890 pnpm dev
+```
 
 ## Checks
 

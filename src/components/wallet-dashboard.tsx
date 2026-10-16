@@ -6,6 +6,7 @@ import { formatEther } from "viem";
 import { useCallback, useEffect, useState } from "react";
 import { getNativeBalance } from "@/services/balance-service";
 import { walletService } from "@/services/wallet-service";
+import { TransactionHistory } from "@/components/transaction-history";
 
 export function WalletDashboard() {
   const router = useRouter();
@@ -105,6 +106,7 @@ export function WalletDashboard() {
           </Link>
         </div>
       </section>
+      {address ? <TransactionHistory key={address} address={address} /> : null}
     </main>
   );
 }
