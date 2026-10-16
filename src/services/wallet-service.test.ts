@@ -1,11 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { encryptVault, type EncryptedVault } from "@/core/crypto";
+import { deriveAccountAtIndex, mnemonicToSeed } from "@/core/hd-wallet";
 import type { StorageService } from "@/core/storage";
 import { WalletService } from "./wallet-service";
 
 const TEST_MNEMONIC =
   "test test test test test test test test test test test junk";
 const EXPECTED_ADDRESS = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
+const SECOND_ADDRESS = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
+const LOCKED_STATE = {
+  isUnlocked: false,
+  address: null,
+  accounts: [],
+  selectedAccountIndex: null,
+};
 
 function createStorage(initialVault: EncryptedVault | null = null) {
   let vault = initialVault;
@@ -31,7 +39,7 @@ describe("WalletService", () => {
     const prepared = await service.prepareWallet();
 
     expect(prepared.mnemonic.split(" ")).toHaveLength(12);
-    expect(service.getState()).toEqual({ isUnlocked: false, address: null });
+    expect(service.getState()).toEqual(LOCKED_STATE);
     expect(getVault()).toBeNull();
 
     await expect(service.createWallet("correct horse", false)).rejects.toThrow(
@@ -44,6 +52,8 @@ describe("WalletService", () => {
     expect(service.getState()).toEqual({
       isUnlocked: true,
       address: prepared.address,
+      accounts: [{ index: 0, address: prepared.address }],
+      selectedAccountIndex: 0,
     });
     expect(getVault()).not.toBeNull();
     expect(JSON.stringify(getVault())).not.toContain(prepared.mnemonic);
@@ -65,12 +75,14 @@ describe("WalletService", () => {
 
     expect(Object.isFrozen(lockedState)).toBe(true);
     await service.importWallet(TEST_MNEMONIC, "correct horse");
+    expect(Object.isFrozen(service.getState().accounts)).toBe(true);
+    expect(Object.isFrozen(service.getState().accounts[0])).toBe(true);
     expect(listener).toHaveBeenCalledTimes(1);
     expect(service.getState().isUnlocked).toBe(true);
 
     service.lock();
     expect(listener).toHaveBeenCalledTimes(2);
-    expect(service.getState()).toEqual({ isUnlocked: false, address: null });
+    expect(service.getState()).toEqual(LOCKED_STATE);
     unsubscribe();
   });
 
@@ -98,11 +110,13 @@ describe("WalletService", () => {
     expect(JSON.stringify(getVault())).not.toContain(TEST_MNEMONIC);
 
     service.lock();
-    expect(service.getState()).toEqual({ isUnlocked: false, address: null });
+    expect(service.getState()).toEqual(LOCKED_STATE);
     await service.unlock("correct horse");
     expect(service.getState()).toEqual({
       isUnlocked: true,
       address: EXPECTED_ADDRESS,
+      accounts: [{ index: 0, address: EXPECTED_ADDRESS }],
+      selectedAccountIndex: 0,
     });
   });
 
@@ -131,7 +145,7 @@ describe("WalletService", () => {
     await expect(service.unlock("wrong password")).rejects.toThrow(
       "Unable to decrypt vault",
     );
-    expect(service.getState()).toEqual({ isUnlocked: false, address: null });
+    expect(service.getState()).toEqual(LOCKED_STATE);
   });
 
   it("fails when no vault exists", async () => {
@@ -149,6 +163,7 @@ describe("WalletService", () => {
       sendTransfer,
     });
     const transaction = {
+      from: EXPECTED_ADDRESS as `0x${string}`,
       to: "0x0000000000000000000000000000000000000001" as `0x${string}`,
       value: BigInt(1),
     };
@@ -168,7 +183,8 @@ describe("WalletService", () => {
       service.signAndSendTransaction({ ...transaction, estimate }),
     ).resolves.toBe("0x1234");
     expect(sendTransfer).toHaveBeenCalledWith({
-      ...transaction,
+      to: transaction.to,
+      value: transaction.value,
       gas: estimate.gas,
       gasPrice: estimate.gasPrice,
       privateKey: expect.stringMatching(/^0x[0-9a-f]{64}$/),
@@ -201,7 +217,82 @@ describe("WalletService", () => {
     resolveLoad?.(null);
 
     await expect(unlockPromise).rejects.toThrow("Wallet operation was cancelled");
-    expect(service.getState()).toEqual({ isUnlocked: false, address: null });
+    expect(service.getState()).toEqual(LOCKED_STATE);
+  });
+
+  it("adds accounts on demand, switches accounts, and resets the list on lock", async () => {
+    const service = new WalletService({ storage: createStorage().storage });
+    await service.importWallet(TEST_MNEMONIC, "correct horse");
+
+    const second = service.addAccount();
+    expect(second).toEqual({ index: 1, address: SECOND_ADDRESS });
+    expect(service.getState()).toEqual({
+      isUnlocked: true,
+      address: SECOND_ADDRESS,
+      accounts: [
+        { index: 0, address: EXPECTED_ADDRESS },
+        { index: 1, address: SECOND_ADDRESS },
+      ],
+      selectedAccountIndex: 1,
+    });
+
+    service.selectAccount(0);
+    expect(service.getAddress()).toBe(EXPECTED_ADDRESS);
+    service.selectAccount(1);
+    expect(service.getAddress()).toBe(SECOND_ADDRESS);
+
+    service.lock();
+    expect(service.getState()).toEqual(LOCKED_STATE);
+    await service.unlock("correct horse");
+    expect(service.getState()).toEqual({
+      isUnlocked: true,
+      address: EXPECTED_ADDRESS,
+      accounts: [{ index: 0, address: EXPECTED_ADDRESS }],
+      selectedAccountIndex: 0,
+    });
+  });
+
+  it("uses the selected account key to sign and rejects a changed account", async () => {
+    const sendTransfer = vi.fn(async () => "0x1234" as `0x${string}`);
+    const service = new WalletService({
+      storage: createStorage().storage,
+      sendTransfer,
+    });
+    await service.importWallet(TEST_MNEMONIC, "correct horse");
+    service.addAccount();
+    const transaction = {
+      from: SECOND_ADDRESS as `0x${string}`,
+      to: "0x0000000000000000000000000000000000000001" as `0x${string}`,
+      value: BigInt(1),
+    };
+    await service.signAndSendTransaction(transaction);
+    const seed = await mnemonicToSeed(TEST_MNEMONIC);
+    const expectedPrivateKey = deriveAccountAtIndex(seed, 1).privateKey;
+    seed.fill(0);
+
+    expect(sendTransfer).toHaveBeenLastCalledWith({
+      to: transaction.to,
+      value: transaction.value,
+      gas: undefined,
+      gasPrice: undefined,
+      privateKey: expectedPrivateKey,
+    });
+
+    service.selectAccount(0);
+    await expect(service.signAndSendTransaction(transaction)).rejects.toThrow(
+      "Selected account changed",
+    );
+    expect(sendTransfer).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects account operations while locked or for an unknown index", async () => {
+    const service = new WalletService({ storage: createStorage().storage });
+
+    expect(() => service.addAccount()).toThrow("Wallet is locked");
+    expect(() => service.selectAccount(0)).toThrow("Wallet is locked");
+
+    await service.importWallet(TEST_MNEMONIC, "correct horse");
+    expect(() => service.selectAccount(1)).toThrow("Account does not exist");
   });
 
   it("cancels wallet preparation when locked while checking storage", async () => {
@@ -259,7 +350,7 @@ describe("WalletService", () => {
     await expect(
       service.importWallet(TEST_MNEMONIC, "correct horse"),
     ).rejects.toThrow("Storage unavailable");
-    expect(service.getState()).toEqual({ isUnlocked: false, address: null });
+    expect(service.getState()).toEqual(LOCKED_STATE);
   });
 
   it("does not unlock when the encrypted vault cannot be saved after backup", async () => {
@@ -273,6 +364,6 @@ describe("WalletService", () => {
     await expect(
       service.createWallet("correct horse", true),
     ).rejects.toThrow("Storage unavailable");
-    expect(service.getState()).toEqual({ isUnlocked: false, address: null });
+    expect(service.getState()).toEqual(LOCKED_STATE);
   });
 });

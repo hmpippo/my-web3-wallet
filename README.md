@@ -33,10 +33,16 @@ Open [http://localhost:3000](http://localhost:3000) to view the app.
 Wallet creation displays a recovery phrase before asking the user to confirm
 its backup and set a password. The vault is not persisted before confirmation.
 Import and unlock are local operations. Locking clears the service's in-memory
-private key and address, including on page unload. Native transfers show an
-estimated fee before confirmation. The browser UI is still a self-custody
-wallet MVP: use Sepolia testnet only, and never enter a recovery phrase used
-for real funds.
+derived keys and account state, including on page unload. Native transfers
+show an estimated fee before confirmation. The browser UI is still a
+self-custody wallet MVP: use Sepolia testnet only, and never enter a recovery
+phrase used for real funds.
+
+The wallet derives Ethereum accounts from `m/44'/60'/0'/0/{index}`. Account 1
+uses index 0 to preserve the default address; add later accounts on demand
+from the wallet dashboard. The account list and selection exist only for the
+current unlocked session. Locking or refreshing clears derived accounts and
+keys; after unlocking, the wallet starts at account 1 again.
 
 ## Transaction history
 
@@ -50,13 +56,15 @@ cursor, so new blocks do not shift the upstream offset pages mid-session.
 Set `ETHERSCAN_API_KEY` in the repository's ignored `.env` file for local
 development, and provide the same server-only environment variable in
 deployment. Do not prefix it with `NEXT_PUBLIC_`. Only the public wallet address
-and signed continuation cursor are sent to the app's history route; wallet
-mnemonics and private keys are never sent. The server route requires a running
-Next.js server and does not work as a static export.
+and the selected activity kind and signed continuation cursor are sent to the
+app's history route; wallet mnemonics and private keys are never sent. The
+server route requires a running Next.js server and does not work as a static
+export.
 
 The free Etherscan tier lists Sepolia as supported and allows up to 3 API calls
-per second and 100,000 calls per day. A history page may request one page from
-each activity source; provider limits or outages are shown as retryable errors.
+per second and 100,000 calls per day. A history page requests one page from its
+selected activity source; provider limits or outages are shown as retryable
+errors.
 If the server cannot reach Etherscan directly, enable Node's environment proxy
 support when starting the dev server, for example:
 

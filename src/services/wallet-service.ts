@@ -5,7 +5,7 @@ import {
   encryptVault,
 } from "@/core/crypto";
 import {
-  deriveAccount,
+  deriveAccountAtIndex,
   generateMnemonic,
   mnemonicToSeed,
   validateMnemonic,
@@ -16,6 +16,13 @@ import { sendNativeTransfer } from "./transaction-service";
 export interface WalletState {
   readonly isUnlocked: boolean;
   readonly address: Address | null;
+  readonly accounts: readonly WalletAccount[];
+  readonly selectedAccountIndex: number | null;
+}
+
+export interface WalletAccount {
+  readonly index: number;
+  readonly address: Address;
 }
 
 export interface PreparedWallet {
@@ -35,14 +42,19 @@ export interface WalletServiceDependencies {
 }
 
 interface PendingWallet extends PreparedWallet {
+  account: WalletAccount;
   privateKey: Hex;
+  seed: Uint8Array;
 }
 
 export class WalletService {
-  private privateKey: Hex | null = null;
+  private seed: Uint8Array | null = null;
+  private readonly privateKeys = new Map<number, Hex>();
   private state: WalletState = Object.freeze({
     isUnlocked: false,
     address: null,
+    accounts: Object.freeze([]),
+    selectedAccountIndex: null,
   });
   private pendingWallet: PendingWallet | null = null;
   private operationVersion = 0;
@@ -82,14 +94,21 @@ export class WalletService {
     this.assertOperationCurrent(operationVersion);
 
     const mnemonic = generateMnemonic();
-    const account = await deriveAccountFromMnemonic(mnemonic);
-    this.assertOperationCurrent(operationVersion);
-    this.pendingWallet = {
-      mnemonic,
-      address: account.address,
-      privateKey: account.privateKey,
-    };
-    return { mnemonic, address: account.address };
+    const { account, seed } = await deriveAccountFromMnemonic(mnemonic, 0);
+    try {
+      this.assertOperationCurrent(operationVersion);
+      this.pendingWallet = {
+        mnemonic,
+        address: account.address,
+        account: { index: 0, address: account.address },
+        privateKey: account.privateKey,
+        seed,
+      };
+      return { mnemonic, address: account.address };
+    } catch (error) {
+      seed.fill(0);
+      throw error;
+    }
   }
 
   async createWallet(
@@ -119,8 +138,11 @@ export class WalletService {
       await this.storage.saveVault(vault);
       this.assertOperationCurrent(operationVersion);
 
-      this.privateKey = pendingWallet.privateKey;
-      this.updateState(true, pendingWallet.address);
+      this.activateWallet(
+        pendingWallet.seed,
+        pendingWallet.account,
+        pendingWallet.privateKey,
+      );
       this.pendingWallet = null;
       return {
         mnemonic: pendingWallet.mnemonic,
@@ -145,20 +167,26 @@ export class WalletService {
     this.assertOperationCurrent(operationVersion);
 
     const normalizedMnemonic = mnemonic.trim().split(/\s+/).join(" ");
-    const account = await deriveAccountFromMnemonic(normalizedMnemonic);
-    this.assertOperationCurrent(operationVersion);
-    const vault = await encryptVault(normalizedMnemonic, password);
-    this.assertOperationCurrent(operationVersion);
-    if (await this.storage.hasVault()) {
-      throw new Error("A wallet already exists on this device");
-    }
-    this.assertOperationCurrent(operationVersion);
-    await this.storage.saveVault(vault);
-    this.assertOperationCurrent(operationVersion);
+    const { account, seed } = await deriveAccountFromMnemonic(normalizedMnemonic, 0);
+    let seedTransferred = false;
+    try {
+      this.assertOperationCurrent(operationVersion);
+      const vault = await encryptVault(normalizedMnemonic, password);
+      this.assertOperationCurrent(operationVersion);
+      if (await this.storage.hasVault()) {
+        throw new Error("A wallet already exists on this device");
+      }
+      this.assertOperationCurrent(operationVersion);
+      await this.storage.saveVault(vault);
+      this.assertOperationCurrent(operationVersion);
 
-    this.privateKey = account.privateKey;
-    this.updateState(true, account.address);
-    return account.address;
+      const walletAccount = { index: 0, address: account.address };
+      this.activateWallet(seed, walletAccount, account.privateKey);
+      seedTransferred = true;
+      return account.address;
+    } finally {
+      if (!seedTransferred) seed.fill(0);
+    }
   }
 
   async unlock(password: string): Promise<void> {
@@ -177,16 +205,27 @@ export class WalletService {
       throw new Error("Stored vault does not contain a valid BIP-39 mnemonic");
     }
 
-    const account = await deriveAccountFromMnemonic(mnemonic);
-    this.assertOperationCurrent(operationVersion);
-    this.privateKey = account.privateKey;
-    this.updateState(true, account.address);
+    const { account, seed } = await deriveAccountFromMnemonic(mnemonic, 0);
+    try {
+      this.assertOperationCurrent(operationVersion);
+      this.activateWallet(
+        seed,
+        { index: 0, address: account.address },
+        account.privateKey,
+      );
+    } catch (error) {
+      seed.fill(0);
+      throw error;
+    }
   }
 
   lock(): void {
     this.operationVersion += 1;
-    this.privateKey = null;
-    this.updateState(false, null);
+    this.seed?.fill(0);
+    this.seed = null;
+    this.privateKeys.clear();
+    this.updateState(false, [], null);
+    this.pendingWallet?.seed.fill(0);
     this.pendingWallet = null;
   }
 
@@ -194,20 +233,52 @@ export class WalletService {
     return this.state.address;
   }
 
+  addAccount(): WalletAccount {
+    if (!this.state.isUnlocked || !this.seed) {
+      throw new Error("Wallet is locked");
+    }
+    const index = this.state.accounts.length;
+    const account = deriveAccountAtIndex(this.seed, index);
+    const walletAccount = Object.freeze({ index, address: account.address });
+    this.privateKeys.set(index, account.privateKey);
+    this.updateState(true, [...this.state.accounts, walletAccount], index);
+    return walletAccount;
+  }
+
+  selectAccount(index: number): void {
+    if (!this.state.isUnlocked) {
+      throw new Error("Wallet is locked");
+    }
+    if (!this.state.accounts.some((account) => account.index === index)) {
+      throw new RangeError("Account does not exist in this wallet session");
+    }
+    this.updateState(true, this.state.accounts, index);
+  }
+
   async signAndSendTransaction(tx: {
+    from: Address;
     to: Address;
     value: bigint;
     estimate?: NativeTransferEstimate;
   }): Promise<Hash> {
-    const privateKey = this.privateKey;
+    const selectedAccount = this.state.accounts.find(
+      (account) => account.index === this.state.selectedAccountIndex,
+    );
+    if (!this.state.isUnlocked || !selectedAccount) {
+      throw new Error("Wallet is locked");
+    }
+    if (tx.from !== selectedAccount.address) {
+      throw new Error("Selected account changed. Review the transfer again.");
+    }
+    const privateKey = this.privateKeys.get(selectedAccount.index);
     if (!privateKey) {
       throw new Error("Wallet is locked");
     }
-    const { estimate, ...transaction } = tx;
     return this.sendTransfer({
-      ...transaction,
-      gas: estimate?.gas,
-      gasPrice: estimate?.gasPrice,
+      to: tx.to,
+      value: tx.value,
+      gas: tx.estimate?.gas,
+      gasPrice: tx.estimate?.gasPrice,
       privateKey,
     });
   }
@@ -224,24 +295,61 @@ export class WalletService {
     }
   }
 
-  private updateState(isUnlocked: boolean, address: Address | null): void {
+  private activateWallet(
+    seed: Uint8Array,
+    account: WalletAccount,
+    privateKey: Hex,
+  ): void {
+    this.seed?.fill(0);
+    this.seed = seed;
+    this.privateKeys.clear();
+    this.privateKeys.set(account.index, privateKey);
+    this.updateState(true, [account], account.index);
+  }
+
+  private updateState(
+    isUnlocked: boolean,
+    accounts: readonly WalletAccount[],
+    selectedAccountIndex: number | null,
+  ): void {
+    const selectedAccount =
+      selectedAccountIndex === null
+        ? undefined
+        : accounts.find((account) => account.index === selectedAccountIndex);
+    const address = selectedAccount?.address ?? null;
     if (
       this.state.isUnlocked === isUnlocked &&
-      this.state.address === address
+      this.state.address === address &&
+      this.state.selectedAccountIndex === selectedAccountIndex &&
+      this.state.accounts.length === accounts.length &&
+      this.state.accounts.every(
+        (account, index) =>
+          account.index === accounts[index]?.index &&
+          account.address === accounts[index]?.address,
+      )
     ) {
       return;
     }
-    this.state = Object.freeze({ isUnlocked, address });
+    const frozenAccounts = Object.freeze(
+      accounts.map((account) => Object.freeze({ ...account })),
+    );
+    this.state = Object.freeze({
+      isUnlocked,
+      address,
+      accounts: frozenAccounts,
+      selectedAccountIndex,
+    });
     for (const listener of this.listeners) listener();
   }
 }
 
-async function deriveAccountFromMnemonic(mnemonic: string) {
+async function deriveAccountFromMnemonic(mnemonic: string, index: number) {
   const seed = await mnemonicToSeed(mnemonic);
   try {
-    return deriveAccount(seed);
-  } finally {
+    return { account: deriveAccountAtIndex(seed, index), seed };
+  } catch (error) {
     seed.fill(0);
+    throw error;
   }
 }
 

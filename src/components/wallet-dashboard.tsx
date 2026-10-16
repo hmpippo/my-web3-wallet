@@ -2,33 +2,55 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { formatEther } from "viem";
-import { useCallback, useEffect, useState } from "react";
+import { formatEther, type Address } from "viem";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { getNativeBalance } from "@/services/balance-service";
 import { walletService } from "@/services/wallet-service";
 import { TransactionHistory } from "@/components/transaction-history";
 
 export function WalletDashboard() {
   const router = useRouter();
-  const address = walletService.getAddress();
-  const [balance, setBalance] = useState<string | null>(null);
-  const [balanceError, setBalanceError] = useState<string | null>(null);
-  const [isLoadingBalance, setIsLoadingBalance] = useState(true);
+  const walletState = useSyncExternalStore(
+    walletService.subscribe,
+    () => walletService.getState(),
+    () => walletService.getState(),
+  );
+  const address = walletState.address;
+  const [balanceResult, setBalanceResult] = useState<{
+    address: Address;
+    value: string;
+  } | null>(null);
+  const [balanceError, setBalanceError] = useState<{
+    address: Address;
+    message: string;
+  } | null>(null);
+  const [isRefreshingBalance, setIsRefreshingBalance] = useState(false);
+  const [accountError, setAccountError] = useState<string | null>(null);
+
+  const balance =
+    address && balanceResult?.address === address ? balanceResult.value : null;
+  const currentBalanceError =
+    address && balanceError?.address === address ? balanceError.message : null;
+  const isLoadingBalance =
+    Boolean(address) &&
+    (isRefreshingBalance || (balance === null && currentBalanceError === null));
 
   const refreshBalance = useCallback(() => {
     if (!address) return;
-    setIsLoadingBalance(true);
+    setIsRefreshingBalance(true);
     setBalanceError(null);
     getNativeBalance(address)
-      .then((result) => setBalance(formatEther(result)))
+      .then((result) => setBalanceResult({ address, value: formatEther(result) }))
       .catch((error: unknown) => {
-        setBalanceError(
-          error instanceof Error
-            ? error.message
-            : "Could not load the Sepolia balance.",
-        );
+        setBalanceError({
+          address,
+          message:
+            error instanceof Error
+              ? error.message
+              : "Could not load the Sepolia balance.",
+        });
       })
-      .finally(() => setIsLoadingBalance(false));
+      .finally(() => setIsRefreshingBalance(false));
   }, [address]);
 
   useEffect(() => {
@@ -36,24 +58,48 @@ export function WalletDashboard() {
     let cancelled = false;
     getNativeBalance(address)
       .then((result) => {
-        if (!cancelled) setBalance(formatEther(result));
+        if (!cancelled) setBalanceResult({ address, value: formatEther(result) });
       })
       .catch((error: unknown) => {
         if (!cancelled) {
-          setBalanceError(
-            error instanceof Error
-              ? error.message
-              : "Could not load the Sepolia balance.",
-          );
+          setBalanceError({
+            address,
+            message:
+              error instanceof Error
+                ? error.message
+                : "Could not load the Sepolia balance.",
+          });
         }
       })
       .finally(() => {
-        if (!cancelled) setIsLoadingBalance(false);
+        if (!cancelled) setIsRefreshingBalance(false);
       });
     return () => {
       cancelled = true;
     };
   }, [address]);
+
+  function handleAddAccount() {
+    try {
+      setAccountError(null);
+      walletService.addAccount();
+    } catch (error) {
+      setAccountError(
+        error instanceof Error ? error.message : "Could not add an account.",
+      );
+    }
+  }
+
+  function handleAccountChange(index: number) {
+    try {
+      setAccountError(null);
+      walletService.selectAccount(index);
+    } catch (error) {
+      setAccountError(
+        error instanceof Error ? error.message : "Could not switch accounts.",
+      );
+    }
+  }
 
   function lockWallet() {
     walletService.lock();
@@ -80,13 +126,40 @@ export function WalletDashboard() {
             Sepolia testnet
           </span>
         </div>
+        <div className="account-controls">
+          <label htmlFor="wallet-account">Account</label>
+          <select
+            id="wallet-account"
+            aria-label="Select account"
+            onChange={(event) => handleAccountChange(Number(event.target.value))}
+            value={walletState.selectedAccountIndex ?? 0}
+          >
+            {walletState.accounts.map((account) => (
+              <option key={account.index} value={account.index}>
+                Account {account.index + 1} · {account.address}
+              </option>
+            ))}
+          </select>
+          <button
+            className="button button-outline account-add"
+            onClick={handleAddAccount}
+            type="button"
+          >
+            Add account
+          </button>
+        </div>
+        {accountError ? (
+          <p className="form-error" role="alert">
+            {accountError}
+          </p>
+        ) : null}
         {isLoadingBalance ? (
           <p className="balance-placeholder" role="status">
             Loading...
           </p>
-        ) : balanceError ? (
+        ) : currentBalanceError ? (
           <div className="balance-error" role="alert">
-            <p>{balanceError}</p>
+            <p>{currentBalanceError}</p>
             <button className="text-link" onClick={refreshBalance} type="button">
               Try again
             </button>

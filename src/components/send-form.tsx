@@ -1,7 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type FormEvent,
+} from "react";
 import {
   formatEther,
   getAddress,
@@ -18,12 +24,19 @@ import {
 import { walletService } from "@/services/wallet-service";
 
 interface TransferReview {
+  from: Address;
   to: Address;
   value: bigint;
   estimate: NativeTransferEstimate;
 }
 
 export function SendForm() {
+  const walletState = useSyncExternalStore(
+    walletService.subscribe,
+    () => walletService.getState(),
+    () => walletService.getState(),
+  );
+  const selectedAddress = walletState.address;
   const reviewRequestId = useRef(0);
   const sendInProgress = useRef(false);
   const [to, setTo] = useState("");
@@ -64,9 +77,9 @@ export function SendForm() {
       });
       if (requestId !== reviewRequestId.current) return;
       if (!walletService.isUnlocked || walletService.getAddress() !== from) {
-        throw new Error("Wallet locked while preparing the transfer.");
+        throw new Error("Selected account changed while preparing the transfer.");
       }
-      setReview({ to: recipient, value, estimate });
+      setReview({ from, to: recipient, value, estimate });
     } catch (caught) {
       if (requestId === reviewRequestId.current) {
         setError(
@@ -92,6 +105,7 @@ export function SendForm() {
     setIsBusy(true);
     try {
       const hash = await walletService.signAndSendTransaction({
+        from: review.from,
         to: review.to,
         value: review.value,
         estimate: review.estimate,
@@ -122,6 +136,9 @@ export function SendForm() {
 
       <section className="preview-card" aria-label="Send ETH">
         <form className="send-fields" onSubmit={reviewTransfer}>
+          <p className="muted-copy send-account">
+            Sending from {selectedAddress ?? "locked wallet"}
+          </p>
           <label>
             Recipient address
             <input
@@ -171,6 +188,10 @@ export function SendForm() {
           <div className="transfer-review" aria-live="polite">
             <h2>Review transfer</h2>
             <dl>
+              <div>
+                <dt>From</dt>
+                <dd>{review.from}</dd>
+              </div>
               <div>
                 <dt>To</dt>
                 <dd>{review.to}</dd>

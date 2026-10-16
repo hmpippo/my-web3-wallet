@@ -86,6 +86,7 @@ export async function POST(request: Request): Promise<Response> {
       requestBody.cursor !== null &&
       typeof requestBody.cursor !== "string") ||
     (requestBody.kind !== undefined &&
+      requestBody.kind !== "all" &&
       requestBody.kind !== "normal" &&
       requestBody.kind !== "internal" &&
       requestBody.kind !== "erc20")

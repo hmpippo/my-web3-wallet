@@ -9,6 +9,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { toHex, type Address, type Hex } from "viem";
 
 export const DEFAULT_PATH = "m/44'/60'/0'/0/0";
+export const MAX_ADDRESS_INDEX = 0x7fffffff;
 
 export interface DerivedAccount {
   privateKey: Hex;
@@ -21,6 +22,7 @@ export interface HDWallet {
   validateMnemonic(mnemonic: string): boolean;
   mnemonicToSeed(mnemonic: string, passphrase?: string): Promise<Uint8Array>;
   deriveAccount(seed: Uint8Array, path?: string): DerivedAccount;
+  deriveAccountAtIndex(seed: Uint8Array, index: number): DerivedAccount;
 }
 
 export function generateMnemonic(strength: 128 | 256 = 128): string {
@@ -74,6 +76,26 @@ export function deriveAccount(
     childKey?.wipePrivateData();
     masterKey.wipePrivateData();
   }
+}
+
+export function accountDerivationPath(index: number): string {
+  if (
+    !Number.isSafeInteger(index) ||
+    index < 0 ||
+    index > MAX_ADDRESS_INDEX
+  ) {
+    throw new RangeError(
+      `Account index must be an integer between 0 and ${MAX_ADDRESS_INDEX}`,
+    );
+  }
+  return `m/44'/60'/0'/0/${index}`;
+}
+
+export function deriveAccountAtIndex(
+  seed: Uint8Array,
+  index: number,
+): DerivedAccount {
+  return deriveAccount(seed, accountDerivationPath(index));
 }
 
 function normalizeMnemonic(mnemonic: string): string {
