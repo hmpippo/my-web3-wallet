@@ -42,6 +42,7 @@ interface CursorPayload {
   version: 1;
   address: string;
   endBlock: string;
+  kind: TransactionHistoryKind | "all";
   sources: Record<HistorySource, SourceCursor>;
 }
 
@@ -69,15 +70,20 @@ export class HistoryServiceError extends Error {
   }
 }
 
-function emptyCursor(address: string, endBlock: string): CursorPayload {
+function emptyCursor(
+  address: string,
+  endBlock: string,
+  kind: TransactionHistoryKind | "all",
+): CursorPayload {
   return {
     version: 1,
     address,
     endBlock,
+    kind,
     sources: {
-      normal: { nextPage: 1, done: false, items: [] },
-      internal: { nextPage: 1, done: false, items: [] },
-      erc20: { nextPage: 1, done: false, items: [] },
+      normal: { nextPage: 1, done: kind !== "all" && kind !== "normal", items: [] },
+      internal: { nextPage: 1, done: kind !== "all" && kind !== "internal", items: [] },
+      erc20: { nextPage: 1, done: kind !== "all" && kind !== "erc20", items: [] },
     },
   };
 }
@@ -319,7 +325,12 @@ function isCursorItem(value: unknown, source: HistorySource): value is CursorIte
   return value.token === null;
 }
 
-function decodeCursor(encoded: string, address: string, apiKey: string): CursorPayload {
+function decodeCursor(
+  encoded: string,
+  address: string,
+  kind: TransactionHistoryKind | "all",
+  apiKey: string,
+): CursorPayload {
   if (encoded.length > MAX_CURSOR_LENGTH) {
     throw new HistoryServiceError("cursor", "The transaction history cursor is invalid.");
   }
@@ -359,6 +370,7 @@ function decodeCursor(encoded: string, address: string, apiKey: string): CursorP
     !isRecord(parsed) ||
     parsed.version !== 1 ||
     parsed.address !== address ||
+    parsed.kind !== kind ||
     typeof parsed.endBlock !== "string" ||
     !isDigits(parsed.endBlock) ||
     !isRecord(parsed.sources)
@@ -437,12 +449,13 @@ function hasMore(payload: CursorPayload): boolean {
 async function loadHistoryPage(
   address: Address,
   cursorValue: string | null,
+  kind: TransactionHistoryKind | "all",
   apiKey: string,
 ): Promise<TransactionHistoryPage> {
   const normalizedAddress = address.toLowerCase();
   let payload: CursorPayload;
   if (cursorValue) {
-    payload = decodeCursor(cursorValue, normalizedAddress, apiKey);
+    payload = decodeCursor(cursorValue, normalizedAddress, kind, apiKey);
   } else {
     let endBlock: bigint;
     try {
@@ -450,7 +463,7 @@ async function loadHistoryPage(
     } catch {
       throw new HistoryServiceError("provider", "Could not determine the current Sepolia block.");
     }
-    payload = emptyCursor(normalizedAddress, endBlock.toString());
+    payload = emptyCursor(normalizedAddress, endBlock.toString(), kind);
   }
   const sources = Object.keys(SOURCE_CONFIG) as HistorySource[];
 
@@ -511,6 +524,7 @@ async function loadHistoryPage(
 export async function getEtherscanHistory(
   address: Address,
   cursorValue?: string | null,
+  kind: TransactionHistoryKind | "all" = "all",
 ): Promise<TransactionHistoryPage> {
   const apiKey = process.env.ETHERSCAN_API_KEY?.trim();
   if (!apiKey) {
@@ -519,11 +533,11 @@ export async function getEtherscanHistory(
 
   const normalizedAddress = address.toLowerCase();
   const normalizedCursor = cursorValue ?? null;
-  const requestKey = `${normalizedAddress}:${normalizedCursor ?? "first-page"}`;
+  const requestKey = `${normalizedAddress}:${kind}:${normalizedCursor ?? "first-page"}`;
   const existingRequest = inFlightPages.get(requestKey);
   if (existingRequest) return existingRequest;
 
-  const request = loadHistoryPage(normalizedAddress as Address, normalizedCursor, apiKey);
+  const request = loadHistoryPage(normalizedAddress as Address, normalizedCursor, kind, apiKey);
   inFlightPages.set(requestKey, request);
   try {
     return await request;

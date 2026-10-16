@@ -40,9 +40,9 @@ for real funds.
 
 ## Transaction history
 
-The wallet dashboard loads normal ETH transactions, internal ETH transfers,
-and ERC-20 transfers from Etherscan API V2 on Sepolia. Results from the three
-independent sources are merged newest-first and paginated without exposing the
+The wallet dashboard has separate tabs for normal ETH transactions, internal
+ETH transfers, and ERC-20 token transfers from Etherscan API V2 on Sepolia.
+Each tab loads and paginates only its own Etherscan source without exposing the
 API key to browser code. NFT activity and token holdings are not included.
 The server pins the current Sepolia block height into the signed pagination
 cursor, so new blocks do not shift the upstream offset pages mid-session.

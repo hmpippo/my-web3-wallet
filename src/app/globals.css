@@ -626,14 +626,46 @@ input {
   letter-spacing: -0.04em;
 }
 
-.history-scope {
-  border-radius: 999px;
-  background: #f1f4f2;
+.history-tabs {
+  display: flex;
+  gap: 0.25rem;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--line);
+  margin: 0 -0.25rem 0.75rem;
+  scrollbar-width: thin;
+}
+
+.history-tab {
+  flex: 0 0 auto;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
   color: var(--muted);
-  padding: 0.4rem 0.65rem;
-  font-size: 0.7rem;
+  padding: 0.7rem 0.75rem 0.65rem;
+  font: inherit;
+  font-size: 0.78rem;
   font-weight: 700;
+  cursor: pointer;
   white-space: nowrap;
+}
+
+.history-tab:hover {
+  color: var(--ink);
+}
+
+.history-tab[aria-selected="true"] {
+  border-bottom-color: var(--accent);
+  color: var(--accent);
+}
+
+.history-tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.history-tabpanel {
+  min-height: 4rem;
+  outline: none;
 }
 
 .history-message {

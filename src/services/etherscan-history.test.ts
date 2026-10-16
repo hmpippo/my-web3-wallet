@@ -156,6 +156,15 @@ describe("Etherscan history service", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
+  it("fetches only the selected activity source for a tab", async () => {
+    const result = await getEtherscanHistory(ADDRESS, null, "erc20");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(new URL(String(fetchMock.mock.calls[0][0])).searchParams.get("action")).toBe("tokentx");
+    expect(result.items.length).toBeGreaterThan(0);
+    expect(result.items.every((item) => item.kind === "erc20")).toBe(true);
+  });
+
   it("merges independently paginated sources without skipping or duplicating rows", async () => {
     const seenIds = new Set<string>();
     let cursor: string | null = null;
@@ -221,6 +230,9 @@ describe("Etherscan history service", () => {
     ).rejects.toBeInstanceOf(HistoryServiceError);
     await expect(
       getEtherscanHistory(RECIPIENT, cursor),
+    ).rejects.toMatchObject({ code: "cursor" });
+    await expect(
+      getEtherscanHistory(ADDRESS, cursor, "internal"),
     ).rejects.toMatchObject({ code: "cursor" });
   });
 

@@ -3,6 +3,7 @@ import {
   getEtherscanHistory,
   HistoryServiceError,
 } from "@/services/etherscan-history";
+import type { TransactionHistoryKind } from "@/types/transaction-history";
 
 const MAX_REQUEST_BYTES = 110_000;
 
@@ -72,18 +73,22 @@ export async function POST(request: Request): Promise<Response> {
     body === null ||
     Array.isArray(body) ||
     !("address" in body) ||
-    Object.keys(body).some((key) => key !== "address" && key !== "cursor")
+    Object.keys(body).some((key) => key !== "address" && key !== "cursor" && key !== "kind")
   ) {
     return jsonError("The history request is invalid.", 400);
   }
 
-  const requestBody = body as { address?: unknown; cursor?: unknown };
+  const requestBody = body as { address?: unknown; cursor?: unknown; kind?: unknown };
   if (
     typeof requestBody.address !== "string" ||
     !isAddress(requestBody.address, { strict: false }) ||
     (requestBody.cursor !== undefined &&
       requestBody.cursor !== null &&
-      typeof requestBody.cursor !== "string")
+      typeof requestBody.cursor !== "string") ||
+    (requestBody.kind !== undefined &&
+      requestBody.kind !== "normal" &&
+      requestBody.kind !== "internal" &&
+      requestBody.kind !== "erc20")
   ) {
     return jsonError("The history request is invalid.", 400);
   }
@@ -92,6 +97,7 @@ export async function POST(request: Request): Promise<Response> {
     const history = await getEtherscanHistory(
       requestBody.address.toLowerCase() as Address,
       typeof requestBody.cursor === "string" ? requestBody.cursor : null,
+      (requestBody.kind ?? "all") as TransactionHistoryKind | "all",
     );
     return Response.json(history, {
       headers: { "Cache-Control": "no-store" },

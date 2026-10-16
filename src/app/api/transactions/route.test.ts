@@ -65,6 +65,22 @@ describe("transaction history route", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
+  it("accepts a selected history kind and fetches only that source", async () => {
+    const response = await POST(makeRequest({ address: ADDRESS, kind: "internal" }));
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(new URL(String(fetchMock.mock.calls[0][0])).searchParams.get("action"))
+      .toBe("txlistinternal");
+  });
+
+  it("rejects unknown history kinds", async () => {
+    const response = await POST(makeRequest({ address: ADDRESS, kind: "nft" }));
+
+    expect(response.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("maps provider errors to sanitized responses", async () => {
     fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
       const url = new URL(input.toString());

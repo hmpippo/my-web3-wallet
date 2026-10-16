@@ -66,13 +66,14 @@ function isHistoryPage(value: unknown): value is TransactionHistoryPage {
 export async function getTransactionHistory(
   address: Address,
   cursor: string | null,
+  kind: TransactionHistoryKind | "all" = "all",
 ): Promise<TransactionHistoryPage> {
   let response: Response;
   try {
     response = await fetch("/api/transactions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ address, cursor }),
+      body: JSON.stringify({ address, cursor, kind }),
       cache: "no-store",
     });
   } catch {
