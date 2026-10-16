@@ -152,6 +152,11 @@ describe("WalletService", () => {
       to: "0x0000000000000000000000000000000000000001" as `0x${string}`,
       value: BigInt(1),
     };
+    const estimate = {
+      gas: BigInt(21_000),
+      gasPrice: BigInt(10),
+      estimatedFee: BigInt(210_000),
+    };
 
     await expect(service.signAndSendTransaction(transaction)).rejects.toThrow(
       "Wallet is locked",
@@ -159,11 +164,13 @@ describe("WalletService", () => {
     expect(sendTransfer).not.toHaveBeenCalled();
 
     await service.importWallet(TEST_MNEMONIC, "correct horse");
-    await expect(service.signAndSendTransaction(transaction)).resolves.toBe(
-      "0x1234",
-    );
+    await expect(
+      service.signAndSendTransaction({ ...transaction, estimate }),
+    ).resolves.toBe("0x1234");
     expect(sendTransfer).toHaveBeenCalledWith({
       ...transaction,
+      gas: estimate.gas,
+      gasPrice: estimate.gasPrice,
       privateKey: expect.stringMatching(/^0x[0-9a-f]{64}$/),
     });
 
@@ -194,6 +201,78 @@ describe("WalletService", () => {
     resolveLoad?.(null);
 
     await expect(unlockPromise).rejects.toThrow("Wallet operation was cancelled");
+    expect(service.getState()).toEqual({ isUnlocked: false, address: null });
+  });
+
+  it("cancels wallet preparation when locked while checking storage", async () => {
+    let resolveHasVault: ((hasVault: boolean) => void) | undefined;
+    const storage: StorageService = {
+      saveVault: vi.fn(async () => undefined),
+      loadVault: vi.fn(async () => null),
+      clearVault: vi.fn(async () => undefined),
+      hasVault: vi.fn(
+        () =>
+          new Promise<boolean>((resolve) => {
+            resolveHasVault = resolve;
+          }),
+      ),
+    };
+    const service = new WalletService({ storage });
+    const preparation = service.prepareWallet();
+
+    service.lock();
+    resolveHasVault?.(false);
+
+    await expect(preparation).rejects.toThrow("Wallet operation was cancelled");
+  });
+
+  it("cancels wallet import when locked while checking storage", async () => {
+    let resolveHasVault: ((hasVault: boolean) => void) | undefined;
+    const storage: StorageService = {
+      saveVault: vi.fn(async () => undefined),
+      loadVault: vi.fn(async () => null),
+      clearVault: vi.fn(async () => undefined),
+      hasVault: vi.fn(
+        () =>
+          new Promise<boolean>((resolve) => {
+            resolveHasVault = resolve;
+          }),
+      ),
+    };
+    const service = new WalletService({ storage });
+    const importing = service.importWallet(TEST_MNEMONIC, "correct horse");
+
+    service.lock();
+    resolveHasVault?.(false);
+
+    await expect(importing).rejects.toThrow("Wallet operation was cancelled");
+    expect(storage.saveVault).not.toHaveBeenCalled();
+  });
+
+  it("does not unlock when vault persistence fails during import", async () => {
+    const storage = createStorage().storage;
+    vi.mocked(storage.saveVault).mockRejectedValueOnce(
+      new Error("Storage unavailable"),
+    );
+    const service = new WalletService({ storage });
+
+    await expect(
+      service.importWallet(TEST_MNEMONIC, "correct horse"),
+    ).rejects.toThrow("Storage unavailable");
+    expect(service.getState()).toEqual({ isUnlocked: false, address: null });
+  });
+
+  it("does not unlock when the encrypted vault cannot be saved after backup", async () => {
+    const storage = createStorage().storage;
+    vi.mocked(storage.saveVault).mockRejectedValueOnce(
+      new Error("Storage unavailable"),
+    );
+    const service = new WalletService({ storage });
+
+    await service.prepareWallet();
+    await expect(
+      service.createWallet("correct horse", true),
+    ).rejects.toThrow("Storage unavailable");
     expect(service.getState()).toEqual({ isUnlocked: false, address: null });
   });
 });

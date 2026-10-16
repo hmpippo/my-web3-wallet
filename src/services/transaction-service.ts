@@ -12,6 +12,8 @@ export interface NativeTransfer {
   to: Address;
   value: bigint;
   privateKey: Hex;
+  gas?: bigint;
+  gasPrice?: bigint;
 }
 
 export interface NativeTransferEstimate {
@@ -42,6 +44,8 @@ export async function sendNativeTransfer({
   to,
   value,
   privateKey,
+  gas: reviewedGas,
+  gasPrice: reviewedGasPrice,
 }: NativeTransfer): Promise<Hash> {
   const normalizedTo = validateRecipient(to);
   if (value <= BigInt(0)) {
@@ -49,11 +53,14 @@ export async function sendNativeTransfer({
   }
 
   const account = privateKeyToAccount(privateKey);
-  const { gas, gasPrice } = await estimateNativeTransfer({
-    from: account.address,
-    to: normalizedTo,
-    value,
-  });
+  const { gas, gasPrice } =
+    reviewedGas !== undefined && reviewedGasPrice !== undefined
+      ? { gas: reviewedGas, gasPrice: reviewedGasPrice }
+      : await estimateNativeTransfer({
+          from: account.address,
+          to: normalizedTo,
+          value,
+        });
 
   const walletClient = createWalletClient({
     account,

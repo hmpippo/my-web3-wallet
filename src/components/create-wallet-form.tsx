@@ -138,6 +138,9 @@ export function CreateWalletForm() {
                 walletService.lock();
                 setMnemonic(null);
                 setAddress(null);
+                setPassword("");
+                setPasswordConfirmation("");
+                setBackupConfirmed(false);
               }}
               type="button"
             >

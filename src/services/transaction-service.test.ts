@@ -78,4 +78,20 @@ describe("native transfer validation", () => {
       }),
     );
   });
+
+  it("sends with the exact gas parameters shown in the review", async () => {
+    const to = "0x0000000000000000000000000000000000000001";
+    const privateKey = `0x${"1".repeat(64)}` as `0x${string}`;
+    const value = BigInt(123);
+    const gas = BigInt(23_000);
+    const gasPrice = BigInt(12);
+
+    await sendNativeTransfer({ to, value, privateKey, gas, gasPrice });
+
+    expect(estimateGas).not.toHaveBeenCalled();
+    expect(getGasPrice).not.toHaveBeenCalled();
+    expect(sendTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({ to, value, gas, gasPrice }),
+    );
+  });
 });

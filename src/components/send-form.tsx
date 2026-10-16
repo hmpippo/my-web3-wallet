@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
   formatEther,
   getAddress,
@@ -11,16 +11,21 @@ import {
   type Hash,
 } from "viem";
 import { CHAIN } from "@/core/chain";
-import { estimateNativeTransfer } from "@/services/transaction-service";
+import {
+  estimateNativeTransfer,
+  type NativeTransferEstimate,
+} from "@/services/transaction-service";
 import { walletService } from "@/services/wallet-service";
 
 interface TransferReview {
   to: Address;
   value: bigint;
-  estimatedFee: bigint;
+  estimate: NativeTransferEstimate;
 }
 
 export function SendForm() {
+  const reviewRequestId = useRef(0);
+  const sendInProgress = useRef(false);
   const [to, setTo] = useState("");
   const [amount, setAmount] = useState("");
   const [review, setReview] = useState<TransferReview | null>(null);
@@ -28,12 +33,20 @@ export function SendForm() {
   const [error, setError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
 
+  useEffect(
+    () => () => {
+      reviewRequestId.current += 1;
+    },
+    [],
+  );
+
   async function reviewTransfer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
     setReview(null);
     setTransactionHash(null);
     setIsBusy(true);
+    const requestId = ++reviewRequestId.current;
 
     try {
       const from = walletService.getAddress();
@@ -49,26 +62,39 @@ export function SendForm() {
         to: recipient,
         value,
       });
-      setReview({ to: recipient, value, estimatedFee: estimate.estimatedFee });
+      if (requestId !== reviewRequestId.current) return;
+      if (!walletService.isUnlocked || walletService.getAddress() !== from) {
+        throw new Error("Wallet locked while preparing the transfer.");
+      }
+      setReview({ to: recipient, value, estimate });
     } catch (caught) {
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : "Unable to prepare this transaction.",
-      );
+      if (requestId === reviewRequestId.current) {
+        setError(
+          caught instanceof Error
+            ? caught.message
+            : "Unable to prepare this transaction.",
+        );
+      }
     } finally {
-      setIsBusy(false);
+      if (requestId === reviewRequestId.current) setIsBusy(false);
     }
   }
 
   async function confirmTransfer() {
-    if (!review) return;
+    if (!review || sendInProgress.current) return;
+    if (!walletService.isUnlocked) {
+      setReview(null);
+      setError("Wallet is locked. Unlock it to continue.");
+      return;
+    }
+    sendInProgress.current = true;
     setError(null);
     setIsBusy(true);
     try {
       const hash = await walletService.signAndSendTransaction({
         to: review.to,
         value: review.value,
+        estimate: review.estimate,
       });
       setTransactionHash(hash);
       setReview(null);
@@ -81,6 +107,7 @@ export function SendForm() {
           : "Transaction failed. Please try again.",
       );
     } finally {
+      sendInProgress.current = false;
       setIsBusy(false);
     }
   }
@@ -100,9 +127,12 @@ export function SendForm() {
             <input
               autoComplete="off"
               onChange={(event) => {
+                reviewRequestId.current += 1;
                 setTo(event.target.value);
                 setReview(null);
+                setIsBusy(false);
               }}
+              disabled={isBusy}
               placeholder="0x..."
               required
               spellCheck={false}
@@ -114,9 +144,12 @@ export function SendForm() {
             <input
               inputMode="decimal"
               onChange={(event) => {
+                reviewRequestId.current += 1;
                 setAmount(event.target.value);
                 setReview(null);
+                setIsBusy(false);
               }}
+              disabled={isBusy}
               placeholder="0.00"
               required
               type="text"
@@ -148,12 +181,12 @@ export function SendForm() {
               </div>
               <div>
                 <dt>Estimated network fee</dt>
-                <dd>{formatEther(review.estimatedFee)} ETH</dd>
+                <dd>{formatEther(review.estimate.estimatedFee)} ETH</dd>
               </div>
               <div>
                 <dt>Estimated total</dt>
                 <dd>
-                  {formatEther(review.value + review.estimatedFee)} ETH
+                  {formatEther(review.value + review.estimate.estimatedFee)} ETH
                 </dd>
               </div>
             </dl>

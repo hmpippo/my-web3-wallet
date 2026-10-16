@@ -1,4 +1,5 @@
 import type { Address, Hash, Hex } from "viem";
+import type { NativeTransferEstimate } from "./transaction-service";
 import {
   decryptVault,
   encryptVault,
@@ -28,6 +29,8 @@ export interface WalletServiceDependencies {
     to: Address;
     value: bigint;
     privateKey: Hex;
+    gas?: bigint;
+    gasPrice?: bigint;
   }) => Promise<Hash>;
 }
 
@@ -70,11 +73,13 @@ export class WalletService {
 
   async prepareWallet(): Promise<PreparedWallet> {
     this.assertNoWalletCreationInProgress();
-    if (await this.storage.hasVault()) {
-      throw new Error("A wallet already exists on this device");
-    }
     this.lock();
     const operationVersion = this.operationVersion;
+    if (await this.storage.hasVault()) {
+      this.assertOperationCurrent(operationVersion);
+      throw new Error("A wallet already exists on this device");
+    }
+    this.assertOperationCurrent(operationVersion);
 
     const mnemonic = generateMnemonic();
     const account = await deriveAccountFromMnemonic(mnemonic);
@@ -131,12 +136,14 @@ export class WalletService {
     if (!validateMnemonic(mnemonic)) {
       throw new Error("Invalid BIP-39 mnemonic");
     }
-    if (await this.storage.hasVault()) {
-      throw new Error("A wallet already exists on this device");
-    }
-
     this.lock();
     const operationVersion = this.operationVersion;
+    if (await this.storage.hasVault()) {
+      this.assertOperationCurrent(operationVersion);
+      throw new Error("A wallet already exists on this device");
+    }
+    this.assertOperationCurrent(operationVersion);
+
     const normalizedMnemonic = mnemonic.trim().split(/\s+/).join(" ");
     const account = await deriveAccountFromMnemonic(normalizedMnemonic);
     this.assertOperationCurrent(operationVersion);
@@ -190,12 +197,19 @@ export class WalletService {
   async signAndSendTransaction(tx: {
     to: Address;
     value: bigint;
+    estimate?: NativeTransferEstimate;
   }): Promise<Hash> {
     const privateKey = this.privateKey;
     if (!privateKey) {
       throw new Error("Wallet is locked");
     }
-    return this.sendTransfer({ ...tx, privateKey });
+    const { estimate, ...transaction } = tx;
+    return this.sendTransfer({
+      ...transaction,
+      gas: estimate?.gas,
+      gasPrice: estimate?.gasPrice,
+      privateKey,
+    });
   }
 
   private assertOperationCurrent(operationVersion: number): void {
