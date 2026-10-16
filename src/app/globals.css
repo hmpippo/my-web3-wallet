@@ -626,6 +626,97 @@ input {
   font-size: 0.78rem;
 }
 
+.account-management {
+  grid-column: 1 / -1;
+  margin-top: 0.35rem;
+}
+
+.account-management-panel {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 0.9rem;
+}
+
+.account-management-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: #fbfcfb;
+  padding: 0.85rem;
+}
+
+.account-management-identity {
+  display: grid;
+  min-width: 0;
+  gap: 0.35rem;
+}
+
+.account-management-name {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-size: 0.85rem;
+}
+
+.account-hidden-label {
+  border-radius: 999px;
+  background: #edf1ee;
+  color: var(--muted);
+  padding: 0.2rem 0.45rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+}
+
+.account-management-identity code {
+  overflow-wrap: anywhere;
+  font-size: 0.72rem;
+}
+
+.account-derivation-path {
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+}
+
+.account-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+}
+
+.account-row-actions .button {
+  min-height: 2.25rem;
+  font-size: 0.72rem;
+}
+
+.account-rename-form {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 0.45rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.account-rename-form input {
+  width: 100%;
+  min-height: 2.5rem;
+  border: 1px solid var(--line);
+  border-radius: 0.55rem;
+  background: white;
+  padding: 0 0.7rem;
+  color: var(--foreground);
+  font: inherit;
+  font-size: 0.8rem;
+}
+
+.account-rename-form input:focus-visible {
+  border-color: var(--accent);
+  outline: 3px solid rgb(20 107 75 / 12%);
+}
+
 .balance-value {
   margin: 1.25rem 0 1.75rem;
   font-size: clamp(2.8rem, 9vw, 4.5rem);
@@ -1010,6 +1101,14 @@ input {
   .balance-topline {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .account-management-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .account-row-actions {
+    justify-content: flex-start;
   }
 
   .history-card {

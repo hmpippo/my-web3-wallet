@@ -9,8 +9,14 @@ import {
   generateMnemonic,
   mnemonicToSeed,
   validateMnemonic,
+  accountDerivationPath,
+  MAX_ADDRESS_INDEX,
 } from "@/core/hd-wallet";
-import { storageService, type StorageService } from "@/core/storage";
+import {
+  storageService,
+  type StorageService,
+  type WalletAccountMetadata,
+} from "@/core/storage";
 import { sendNativeTransfer } from "./transaction-service";
 
 export interface WalletState {
@@ -22,7 +28,10 @@ export interface WalletState {
 
 export interface WalletAccount {
   readonly index: number;
+  readonly path: string;
+  readonly name: string;
   readonly address: Address;
+  readonly hidden: boolean;
 }
 
 export interface PreparedWallet {
@@ -58,6 +67,8 @@ export class WalletService {
   });
   private pendingWallet: PendingWallet | null = null;
   private operationVersion = 0;
+  private accountMutationVersion = 0;
+  private accountMutationInProgress = false;
   private walletCreationInProgress = false;
   private readonly listeners = new Set<() => void>();
   private readonly storage: StorageService;
@@ -100,7 +111,7 @@ export class WalletService {
       this.pendingWallet = {
         mnemonic,
         address: account.address,
-        account: { index: 0, address: account.address },
+        account: createWalletAccount(0, account.address),
         privateKey: account.privateKey,
         seed,
       };
@@ -136,13 +147,27 @@ export class WalletService {
       }
       this.assertOperationCurrent(operationVersion);
       await this.storage.saveVault(vault);
-      this.assertOperationCurrent(operationVersion);
+      try {
+        this.assertOperationCurrent(operationVersion);
+        const account = pendingWallet.account;
+        await this.storage.saveAccountMetadata({
+          version: 1,
+          accounts: [
+            {
+              path: account.path,
+              name: account.name,
+              hidden: false,
+            },
+          ],
+          selectedPath: account.path,
+        });
+        this.assertOperationCurrent(operationVersion);
+      } catch (error) {
+        await this.storage.clearVault();
+        throw error;
+      }
 
-      this.activateWallet(
-        pendingWallet.seed,
-        pendingWallet.account,
-        pendingWallet.privateKey,
-      );
+      this.activateWallet(pendingWallet.seed, [pendingWallet.account], 0, pendingWallet.privateKey);
       this.pendingWallet = null;
       return {
         mnemonic: pendingWallet.mnemonic,
@@ -178,10 +203,23 @@ export class WalletService {
       }
       this.assertOperationCurrent(operationVersion);
       await this.storage.saveVault(vault);
-      this.assertOperationCurrent(operationVersion);
-
-      const walletAccount = { index: 0, address: account.address };
-      this.activateWallet(seed, walletAccount, account.privateKey);
+      try {
+        this.assertOperationCurrent(operationVersion);
+        const walletAccount = createWalletAccount(0, account.address);
+        await this.storage.saveAccountMetadata({
+          version: 1,
+          accounts: [
+            { path: walletAccount.path, name: walletAccount.name, hidden: false },
+          ],
+          selectedPath: walletAccount.path,
+        });
+        this.assertOperationCurrent(operationVersion);
+      } catch (error) {
+        await this.storage.clearVault();
+        throw error;
+      }
+      const walletAccount = createWalletAccount(0, account.address);
+      this.activateWallet(seed, [walletAccount], 0, account.privateKey);
       seedTransferred = true;
       return account.address;
     } finally {
@@ -208,11 +246,40 @@ export class WalletService {
     const { account, seed } = await deriveAccountFromMnemonic(mnemonic, 0);
     try {
       this.assertOperationCurrent(operationVersion);
-      this.activateWallet(
-        seed,
-        { index: 0, address: account.address },
-        account.privateKey,
-      );
+      const storedMetadata = await this.storage.loadAccountMetadata();
+      this.assertOperationCurrent(operationVersion);
+      const metadata = storedMetadata ?? createDefaultMetadata();
+      const selectedPath = resolveSelectedPath(metadata);
+      const accounts: WalletAccount[] = [];
+      let selectedPrivateKey: Hex | null = null;
+      for (const storedAccount of metadata.accounts) {
+        const index = accountIndexFromPath(storedAccount.path);
+        const derived = index === 0 ? account : deriveAccountAtIndex(seed, index);
+        const walletAccount: WalletAccount = {
+          index,
+          path: storedAccount.path,
+          name: storedAccount.name,
+          address: derived.address,
+          hidden: storedAccount.hidden,
+        };
+        accounts.push(walletAccount);
+        if (storedAccount.path === selectedPath) {
+          selectedPrivateKey = derived.privateKey;
+        }
+      }
+
+      if (!storedMetadata || storedMetadata.selectedPath !== selectedPath) {
+        await this.storage.saveAccountMetadata({
+          ...metadata,
+          selectedPath,
+        });
+        this.assertOperationCurrent(operationVersion);
+      }
+      const selectedIndex = accountIndexFromPath(selectedPath);
+      if (!selectedPrivateKey) {
+        selectedPrivateKey = deriveAccountAtIndex(seed, selectedIndex).privateKey;
+      }
+      this.activateWallet(seed, accounts, selectedIndex, selectedPrivateKey);
     } catch (error) {
       seed.fill(0);
       throw error;
@@ -221,6 +288,8 @@ export class WalletService {
 
   lock(): void {
     this.operationVersion += 1;
+    this.accountMutationVersion += 1;
+    this.accountMutationInProgress = false;
     this.seed?.fill(0);
     this.seed = null;
     this.privateKeys.clear();
@@ -233,26 +302,132 @@ export class WalletService {
     return this.state.address;
   }
 
-  addAccount(): WalletAccount {
+  async addAccount(): Promise<WalletAccount> {
     if (!this.state.isUnlocked || !this.seed) {
       throw new Error("Wallet is locked");
     }
-    const index = this.state.accounts.length;
-    const account = deriveAccountAtIndex(this.seed, index);
-    const walletAccount = Object.freeze({ index, address: account.address });
-    this.privateKeys.set(index, account.privateKey);
-    this.updateState(true, [...this.state.accounts, walletAccount], index);
-    return walletAccount;
+    const mutationVersion = this.beginAccountMutation();
+    const operationVersion = this.operationVersion;
+    try {
+      const index = this.state.accounts.reduce(
+        (nextIndex, account) => Math.max(nextIndex, account.index + 1),
+        0,
+      );
+      if (index > MAX_ADDRESS_INDEX) {
+        throw new RangeError("No more Ethereum account indexes are available");
+      }
+      const account = deriveAccountAtIndex(this.seed, index);
+      const walletAccount = Object.freeze({
+        ...createWalletAccount(index, account.address),
+      });
+      const accounts = [...this.state.accounts, walletAccount];
+      await this.persistAccounts(accounts, index);
+      this.assertOperationCurrent(operationVersion);
+      this.privateKeys.set(index, account.privateKey);
+      this.updateState(true, accounts, index);
+      return walletAccount;
+    } finally {
+      this.finishAccountMutation(mutationVersion);
+    }
   }
 
-  selectAccount(index: number): void {
+  async selectAccount(index: number): Promise<void> {
     if (!this.state.isUnlocked) {
       throw new Error("Wallet is locked");
     }
-    if (!this.state.accounts.some((account) => account.index === index)) {
+    const selectedAccount = this.state.accounts.find(
+      (account) => account.index === index && !account.hidden,
+    );
+    if (!selectedAccount) {
       throw new RangeError("Account does not exist in this wallet session");
     }
-    this.updateState(true, this.state.accounts, index);
+    const mutationVersion = this.beginAccountMutation();
+    const operationVersion = this.operationVersion;
+    try {
+      const privateKey = this.privateKeys.get(index);
+      if (!privateKey && this.seed) {
+        const derived = deriveAccountAtIndex(this.seed, index);
+        this.privateKeys.set(index, derived.privateKey);
+      }
+      await this.persistAccounts(this.state.accounts, index);
+      this.assertOperationCurrent(operationVersion);
+      this.updateState(true, this.state.accounts, index);
+    } finally {
+      this.finishAccountMutation(mutationVersion);
+    }
+  }
+
+  async renameAccount(index: number, name: string): Promise<void> {
+    if (!this.state.isUnlocked) throw new Error("Wallet is locked");
+    const account = this.state.accounts.find((candidate) => candidate.index === index);
+    if (!account) throw new RangeError("Account does not exist in this wallet session");
+    const normalizedName = name.trim();
+    if (normalizedName.length === 0 || normalizedName.length > 32) {
+      throw new RangeError("Account name must be between 1 and 32 characters");
+    }
+    const mutationVersion = this.beginAccountMutation();
+    const operationVersion = this.operationVersion;
+    try {
+      const accounts = this.state.accounts.map((candidate) =>
+        candidate.index === index
+          ? { ...candidate, name: normalizedName }
+          : candidate,
+      );
+      await this.persistAccounts(accounts, this.state.selectedAccountIndex);
+      this.assertOperationCurrent(operationVersion);
+      this.updateState(true, accounts, this.state.selectedAccountIndex);
+    } finally {
+      this.finishAccountMutation(mutationVersion);
+    }
+  }
+
+  async hideAccount(index: number): Promise<void> {
+    if (!this.state.isUnlocked) throw new Error("Wallet is locked");
+    const account = this.state.accounts.find((candidate) => candidate.index === index);
+    if (!account) throw new RangeError("Account does not exist in this wallet session");
+    if (account.hidden) return;
+
+    const visibleAccounts = this.state.accounts.filter(
+      (candidate) => !candidate.hidden && candidate.index !== index,
+    );
+    if (visibleAccounts.length === 0) {
+      throw new Error("At least one account must remain visible");
+    }
+    const mutationVersion = this.beginAccountMutation();
+    const operationVersion = this.operationVersion;
+    try {
+      const selectedIndex =
+        this.state.selectedAccountIndex === index
+          ? visibleAccounts[0]!.index
+          : this.state.selectedAccountIndex;
+      const accounts = this.state.accounts.map((candidate) =>
+        candidate.index === index ? { ...candidate, hidden: true } : candidate,
+      );
+      await this.persistAccounts(accounts, selectedIndex);
+      this.assertOperationCurrent(operationVersion);
+      this.updateState(true, accounts, selectedIndex);
+    } finally {
+      this.finishAccountMutation(mutationVersion);
+    }
+  }
+
+  async restoreAccount(index: number): Promise<void> {
+    if (!this.state.isUnlocked) throw new Error("Wallet is locked");
+    const account = this.state.accounts.find((candidate) => candidate.index === index);
+    if (!account) throw new RangeError("Account does not exist in this wallet session");
+    if (!account.hidden) return;
+    const mutationVersion = this.beginAccountMutation();
+    const operationVersion = this.operationVersion;
+    try {
+      const accounts = this.state.accounts.map((candidate) =>
+        candidate.index === index ? { ...candidate, hidden: false } : candidate,
+      );
+      await this.persistAccounts(accounts, this.state.selectedAccountIndex);
+      this.assertOperationCurrent(operationVersion);
+      this.updateState(true, accounts, this.state.selectedAccountIndex);
+    } finally {
+      this.finishAccountMutation(mutationVersion);
+    }
   }
 
   async signAndSendTransaction(tx: {
@@ -297,14 +472,44 @@ export class WalletService {
 
   private activateWallet(
     seed: Uint8Array,
-    account: WalletAccount,
+    accounts: readonly WalletAccount[],
+    selectedIndex: number,
     privateKey: Hex,
   ): void {
     this.seed?.fill(0);
     this.seed = seed;
     this.privateKeys.clear();
-    this.privateKeys.set(account.index, privateKey);
-    this.updateState(true, [account], account.index);
+    this.privateKeys.set(selectedIndex, privateKey);
+    this.updateState(true, accounts, selectedIndex);
+  }
+
+  private async persistAccounts(
+    accounts: readonly WalletAccount[],
+    selectedIndex: number | null,
+  ): Promise<void> {
+    const selected = accounts.find(
+      (account) => account.index === selectedIndex && !account.hidden,
+    );
+    if (!selected) throw new Error("Select a visible account before saving");
+    await this.storage.saveAccountMetadata({
+      version: 1,
+      accounts: accounts.map(({ path, name, hidden }) => ({ path, name, hidden })),
+      selectedPath: selected.path,
+    });
+  }
+
+  private beginAccountMutation(): number {
+    if (this.accountMutationInProgress) {
+      throw new Error("Another account update is already in progress");
+    }
+    this.accountMutationInProgress = true;
+    return this.accountMutationVersion;
+  }
+
+  private finishAccountMutation(mutationVersion: number): void {
+    if (mutationVersion === this.accountMutationVersion) {
+      this.accountMutationInProgress = false;
+    }
   }
 
   private updateState(
@@ -325,7 +530,10 @@ export class WalletService {
       this.state.accounts.every(
         (account, index) =>
           account.index === accounts[index]?.index &&
-          account.address === accounts[index]?.address,
+          account.path === accounts[index]?.path &&
+          account.name === accounts[index]?.name &&
+          account.address === accounts[index]?.address &&
+          account.hidden === accounts[index]?.hidden,
       )
     ) {
       return;
@@ -351,6 +559,48 @@ async function deriveAccountFromMnemonic(mnemonic: string, index: number) {
     seed.fill(0);
     throw error;
   }
+}
+
+function createWalletAccount(index: number, address: Address): WalletAccount {
+  return {
+    index,
+    path: accountDerivationPath(index),
+    name: `Account ${index + 1}`,
+    address,
+    hidden: false,
+  };
+}
+
+function createDefaultMetadata(): WalletAccountMetadata {
+  const path = accountDerivationPath(0);
+  return {
+    version: 1,
+    accounts: [{ path, name: "Account 1", hidden: false }],
+    selectedPath: path,
+  };
+}
+
+function resolveSelectedPath(metadata: WalletAccountMetadata): string {
+  const selected = metadata.accounts.find(
+    (account) => account.path === metadata.selectedPath && !account.hidden,
+  );
+  if (selected) return selected.path;
+  const firstVisible =
+    metadata.accounts.find(
+      (account) => account.path === accountDerivationPath(0) && !account.hidden,
+    ) ?? metadata.accounts.find((account) => !account.hidden);
+  if (!firstVisible) throw new Error("No visible wallet accounts are available");
+  return firstVisible.path;
+}
+
+function accountIndexFromPath(path: string): number {
+  const match = /^m\/44'\/60'\/0'\/0\/(0|[1-9]\d*)$/.exec(path);
+  if (!match) throw new Error("Stored account has an invalid derivation path");
+  const index = Number(match[1]);
+  if (!Number.isSafeInteger(index) || accountDerivationPath(index) !== path) {
+    throw new Error("Stored account has an invalid derivation path");
+  }
+  return index;
 }
 
 export const walletService = new WalletService();

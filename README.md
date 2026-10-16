@@ -21,7 +21,7 @@ Open [http://localhost:3000](http://localhost:3000) to view the app.
 - `src/components/` — shared presentational UI
 - `src/core/hd-wallet.ts` — BIP-39 mnemonics and BIP-32 account derivation
 - `src/core/crypto.ts` — PBKDF2 (600,000 iterations) and AES-GCM vault encryption
-- `src/core/storage.ts` — encrypted-vault-only browser storage
+- `src/core/storage.ts` — encrypted vault and public account metadata storage
 - `src/core/chain.ts` — Sepolia chain and viem public client
 - `src/services/wallet-service.ts` — create, import, unlock, lock, and send lifecycle
 - `src/services/transaction-service.ts` — estimated-gas native transfers with viem
@@ -40,9 +40,14 @@ phrase used for real funds.
 
 The wallet derives Ethereum accounts from `m/44'/60'/0'/0/{index}`. Account 1
 uses index 0 to preserve the default address; add later accounts on demand
-from the wallet dashboard. The account list and selection exist only for the
-current unlocked session. Locking or refreshing clears derived accounts and
-keys; after unlocking, the wallet starts at account 1 again.
+from the wallet dashboard. All accounts derived from the same recovery phrase
+are grouped under the same wallet. Their derivation paths, editable names,
+visibility, and last selected account are persisted as public metadata in
+`wallet_accounts_v1`, separately from the encrypted mnemonic vault. No seed or
+private key is stored there. Locking clears derived keys from memory; after
+unlocking, the wallet restores the saved accounts and selected visible account.
+Accounts can be hidden and restored without deleting them or their funds, and
+new accounts always use the next unused derivation index.
 
 ## Transaction history
 

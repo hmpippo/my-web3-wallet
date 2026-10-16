@@ -1,12 +1,29 @@
 import type { EncryptedVault } from "./crypto";
+import { accountDerivationPath } from "./hd-wallet";
 
 export const VAULT_STORAGE_KEY = "wallet_vault_v1";
+export const ACCOUNT_METADATA_STORAGE_KEY = "wallet_accounts_v1";
+
+export interface StoredWalletAccount {
+  readonly path: string;
+  readonly name: string;
+  readonly hidden: boolean;
+}
+
+export interface WalletAccountMetadata {
+  readonly version: 1;
+  readonly accounts: readonly StoredWalletAccount[];
+  readonly selectedPath: string;
+}
 
 export interface StorageService {
   saveVault(vault: EncryptedVault): Promise<void>;
   loadVault(): Promise<EncryptedVault | null>;
   clearVault(): Promise<void>;
   hasVault(): Promise<boolean>;
+  saveAccountMetadata(metadata: WalletAccountMetadata): Promise<void>;
+  loadAccountMetadata(): Promise<WalletAccountMetadata | null>;
+  clearAccountMetadata(): Promise<void>;
 }
 
 export const storageService: StorageService = {
@@ -33,10 +50,39 @@ export const storageService: StorageService = {
   async clearVault() {
     const storage = getLocalStorage();
     storage.removeItem(VAULT_STORAGE_KEY);
+    storage.removeItem(ACCOUNT_METADATA_STORAGE_KEY);
   },
 
   async hasVault() {
     return (await storageService.loadVault()) !== null;
+  },
+
+  async saveAccountMetadata(metadata) {
+    const storage = getLocalStorage();
+    const validatedMetadata = parseAccountMetadata(metadata);
+    storage.setItem(
+      ACCOUNT_METADATA_STORAGE_KEY,
+      JSON.stringify(validatedMetadata),
+    );
+  },
+
+  async loadAccountMetadata() {
+    const storage = getLocalStorage();
+    const serializedMetadata = storage.getItem(ACCOUNT_METADATA_STORAGE_KEY);
+    if (serializedMetadata === null) return null;
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(serializedMetadata);
+    } catch {
+      throw new Error("Stored account metadata is not valid JSON");
+    }
+    return parseAccountMetadata(parsed);
+  },
+
+  async clearAccountMetadata() {
+    const storage = getLocalStorage();
+    storage.removeItem(ACCOUNT_METADATA_STORAGE_KEY);
   },
 };
 
@@ -75,4 +121,84 @@ function parseStoredVault(value: unknown): EncryptedVault {
     iv: candidate.iv,
     ciphertext: candidate.ciphertext,
   };
+}
+
+function parseAccountMetadata(value: unknown): WalletAccountMetadata {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("version" in value) ||
+    !("accounts" in value) ||
+    !("selectedPath" in value)
+  ) {
+    throw new Error("Stored account metadata has an invalid structure");
+  }
+
+  const candidate = value as Record<string, unknown>;
+  if (
+    candidate.version !== 1 ||
+    !Array.isArray(candidate.accounts) ||
+    typeof candidate.selectedPath !== "string"
+  ) {
+    throw new Error("Stored account metadata has an unsupported structure");
+  }
+
+  const accounts = candidate.accounts.map(parseStoredAccount);
+  const paths = new Set(accounts.map((account) => account.path));
+  if (
+    accounts.length === 0 ||
+    !paths.has(accountDerivationPath(0)) ||
+    paths.size !== accounts.length ||
+    accounts.every((account) => account.hidden)
+  ) {
+    throw new Error("Stored account metadata has invalid or duplicate accounts");
+  }
+  return {
+    version: 1,
+    accounts,
+    selectedPath: candidate.selectedPath,
+  };
+}
+
+function parseStoredAccount(value: unknown): StoredWalletAccount {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    !("path" in value) ||
+    !("name" in value) ||
+    !("hidden" in value)
+  ) {
+    throw new Error("Stored account metadata contains an invalid account");
+  }
+
+  const candidate = value as Record<string, unknown>;
+  const index =
+    typeof candidate.path === "string" ? accountIndex(candidate.path) : null;
+  if (
+    index === null ||
+    typeof candidate.name !== "string" ||
+    candidate.name.trim().length === 0 ||
+    candidate.name.trim().length > 32 ||
+    typeof candidate.hidden !== "boolean"
+  ) {
+    throw new Error("Stored account metadata contains an invalid account");
+  }
+
+  return {
+    path: accountDerivationPath(index),
+    name: candidate.name.trim(),
+    hidden: candidate.hidden,
+  };
+}
+
+function accountIndex(path: string): number | null {
+  const match = /^m\/44'\/60'\/0'\/0\/(0|[1-9]\d*)$/.exec(path);
+  if (!match) return null;
+
+  const index = Number(match[1]);
+  try {
+    return accountDerivationPath(index) === path ? index : null;
+  } catch {
+    return null;
+  }
 }

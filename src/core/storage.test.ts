@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { storageService, VAULT_STORAGE_KEY } from "./storage";
+import {
+  ACCOUNT_METADATA_STORAGE_KEY,
+  storageService,
+  VAULT_STORAGE_KEY,
+  type WalletAccountMetadata,
+} from "./storage";
 import type { EncryptedVault } from "./crypto";
 
 const testVault: EncryptedVault = {
@@ -7,6 +12,14 @@ const testVault: EncryptedVault = {
   salt: "c2FsdA==",
   iv: "aXY=",
   ciphertext: "Y2lwaGVydGV4dA==",
+};
+const testAccountMetadata: WalletAccountMetadata = {
+  version: 1,
+  accounts: [
+    { path: "m/44'/60'/0'/0/0", name: "Account 1", hidden: false },
+    { path: "m/44'/60'/0'/0/2", name: "Savings", hidden: false },
+  ],
+  selectedPath: "m/44'/60'/0'/0/2",
 };
 
 function createLocalStorageMock() {
@@ -47,10 +60,74 @@ describe("vault storage", () => {
     vi.stubGlobal("window", { localStorage });
 
     await storageService.saveVault(testVault);
+    await storageService.saveAccountMetadata(testAccountMetadata);
     await storageService.clearVault();
 
     expect(localStorage.removeItem).toHaveBeenCalledWith(VAULT_STORAGE_KEY);
+    expect(localStorage.removeItem).toHaveBeenCalledWith(
+      ACCOUNT_METADATA_STORAGE_KEY,
+    );
     await expect(storageService.loadVault()).resolves.toBeNull();
+    await expect(storageService.loadAccountMetadata()).resolves.toBeNull();
+  });
+
+  it("saves and loads validated public account metadata", async () => {
+    const localStorage = createLocalStorageMock();
+    vi.stubGlobal("window", { localStorage });
+
+    await storageService.saveAccountMetadata(testAccountMetadata);
+
+    expect(localStorage.setItem).toHaveBeenCalledWith(
+      ACCOUNT_METADATA_STORAGE_KEY,
+      JSON.stringify(testAccountMetadata),
+    );
+    await expect(storageService.loadAccountMetadata()).resolves.toEqual(
+      testAccountMetadata,
+    );
+  });
+
+  it("returns null when account metadata has not been created yet", async () => {
+    vi.stubGlobal("window", { localStorage: createLocalStorageMock() });
+
+    await expect(storageService.loadAccountMetadata()).resolves.toBeNull();
+  });
+
+  it("rejects malformed or unsafe account metadata", async () => {
+    const localStorage = createLocalStorageMock();
+    vi.stubGlobal("window", { localStorage });
+
+    localStorage.setItem(ACCOUNT_METADATA_STORAGE_KEY, "{");
+    await expect(storageService.loadAccountMetadata()).rejects.toThrow(
+      "not valid JSON",
+    );
+
+    localStorage.setItem(
+      ACCOUNT_METADATA_STORAGE_KEY,
+      JSON.stringify({
+        ...testAccountMetadata,
+        accounts: [
+          ...testAccountMetadata.accounts,
+          { path: "m/44'/60'/0'/0/2", name: "Duplicate", hidden: false },
+        ],
+      }),
+    );
+    await expect(storageService.loadAccountMetadata()).rejects.toThrow(
+      "invalid or duplicate accounts",
+    );
+
+    localStorage.setItem(
+      ACCOUNT_METADATA_STORAGE_KEY,
+      JSON.stringify({
+        ...testAccountMetadata,
+        accounts: testAccountMetadata.accounts.map((account) => ({
+          ...account,
+          hidden: true,
+        })),
+      }),
+    );
+    await expect(storageService.loadAccountMetadata()).rejects.toThrow(
+      "invalid or duplicate accounts",
+    );
   });
 
   it("surfaces invalid stored JSON and invalid vault shapes", async () => {

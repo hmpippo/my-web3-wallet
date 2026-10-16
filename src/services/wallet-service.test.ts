@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { encryptVault, type EncryptedVault } from "@/core/crypto";
 import { deriveAccountAtIndex, mnemonicToSeed } from "@/core/hd-wallet";
-import type { StorageService } from "@/core/storage";
+import type {
+  StorageService,
+  WalletAccountMetadata,
+} from "@/core/storage";
 import { WalletService } from "./wallet-service";
 
 const TEST_MNEMONIC =
@@ -15,8 +18,12 @@ const LOCKED_STATE = {
   selectedAccountIndex: null,
 };
 
-function createStorage(initialVault: EncryptedVault | null = null) {
+function createStorage(
+  initialVault: EncryptedVault | null = null,
+  initialMetadata: WalletAccountMetadata | null = null,
+) {
   let vault = initialVault;
+  let accountMetadata = initialMetadata;
   const storage: StorageService = {
     saveVault: vi.fn(async (value) => {
       vault = value;
@@ -26,8 +33,19 @@ function createStorage(initialVault: EncryptedVault | null = null) {
       vault = null;
     }),
     hasVault: vi.fn(async () => vault !== null),
+    saveAccountMetadata: vi.fn(async (value) => {
+      accountMetadata = value;
+    }),
+    loadAccountMetadata: vi.fn(async () => accountMetadata),
+    clearAccountMetadata: vi.fn(async () => {
+      accountMetadata = null;
+    }),
   };
-  return { storage, getVault: () => vault };
+  return {
+    storage,
+    getVault: () => vault,
+    getAccountMetadata: () => accountMetadata,
+  };
 }
 
 describe("WalletService", () => {
@@ -52,7 +70,15 @@ describe("WalletService", () => {
     expect(service.getState()).toEqual({
       isUnlocked: true,
       address: prepared.address,
-      accounts: [{ index: 0, address: prepared.address }],
+      accounts: [
+        {
+          index: 0,
+          path: "m/44'/60'/0'/0/0",
+          name: "Account 1",
+          address: prepared.address,
+          hidden: false,
+        },
+      ],
       selectedAccountIndex: 0,
     });
     expect(getVault()).not.toBeNull();
@@ -115,7 +141,15 @@ describe("WalletService", () => {
     expect(service.getState()).toEqual({
       isUnlocked: true,
       address: EXPECTED_ADDRESS,
-      accounts: [{ index: 0, address: EXPECTED_ADDRESS }],
+      accounts: [
+        {
+          index: 0,
+          path: "m/44'/60'/0'/0/0",
+          name: "Account 1",
+          address: EXPECTED_ADDRESS,
+          hidden: false,
+        },
+      ],
       selectedAccountIndex: 0,
     });
   });
@@ -209,6 +243,9 @@ describe("WalletService", () => {
       ),
       clearVault: vi.fn(async () => undefined),
       hasVault: vi.fn(async () => true),
+      saveAccountMetadata: vi.fn(async () => undefined),
+      loadAccountMetadata: vi.fn(async () => null),
+      clearAccountMetadata: vi.fn(async () => undefined),
     };
     const service = new WalletService({ storage });
     const unlockPromise = service.unlock("correct horse");
@@ -220,35 +257,64 @@ describe("WalletService", () => {
     expect(service.getState()).toEqual(LOCKED_STATE);
   });
 
-  it("adds accounts on demand, switches accounts, and resets the list on lock", async () => {
-    const service = new WalletService({ storage: createStorage().storage });
+  it("persists accounts and selected account across lock and unlock", async () => {
+    const { storage, getAccountMetadata } = createStorage();
+    const service = new WalletService({ storage });
     await service.importWallet(TEST_MNEMONIC, "correct horse");
 
-    const second = service.addAccount();
-    expect(second).toEqual({ index: 1, address: SECOND_ADDRESS });
+    const second = await service.addAccount();
+    expect(second).toEqual({
+      index: 1,
+      path: "m/44'/60'/0'/0/1",
+      name: "Account 2",
+      address: SECOND_ADDRESS,
+      hidden: false,
+    });
     expect(service.getState()).toEqual({
       isUnlocked: true,
       address: SECOND_ADDRESS,
       accounts: [
-        { index: 0, address: EXPECTED_ADDRESS },
-        { index: 1, address: SECOND_ADDRESS },
+        {
+          index: 0,
+          path: "m/44'/60'/0'/0/0",
+          name: "Account 1",
+          address: EXPECTED_ADDRESS,
+          hidden: false,
+        },
+        second,
       ],
       selectedAccountIndex: 1,
     });
 
-    service.selectAccount(0);
+    await service.selectAccount(0);
     expect(service.getAddress()).toBe(EXPECTED_ADDRESS);
-    service.selectAccount(1);
+    await service.selectAccount(1);
     expect(service.getAddress()).toBe(SECOND_ADDRESS);
+    expect(getAccountMetadata()?.selectedPath).toBe("m/44'/60'/0'/0/1");
 
     service.lock();
     expect(service.getState()).toEqual(LOCKED_STATE);
     await service.unlock("correct horse");
     expect(service.getState()).toEqual({
       isUnlocked: true,
-      address: EXPECTED_ADDRESS,
-      accounts: [{ index: 0, address: EXPECTED_ADDRESS }],
-      selectedAccountIndex: 0,
+      address: SECOND_ADDRESS,
+      accounts: [
+        {
+          index: 0,
+          path: "m/44'/60'/0'/0/0",
+          name: "Account 1",
+          address: EXPECTED_ADDRESS,
+          hidden: false,
+        },
+        {
+          index: 1,
+          path: "m/44'/60'/0'/0/1",
+          name: "Account 2",
+          address: SECOND_ADDRESS,
+          hidden: false,
+        },
+      ],
+      selectedAccountIndex: 1,
     });
   });
 
@@ -259,7 +325,7 @@ describe("WalletService", () => {
       sendTransfer,
     });
     await service.importWallet(TEST_MNEMONIC, "correct horse");
-    service.addAccount();
+    await service.addAccount();
     const transaction = {
       from: SECOND_ADDRESS as `0x${string}`,
       to: "0x0000000000000000000000000000000000000001" as `0x${string}`,
@@ -278,21 +344,113 @@ describe("WalletService", () => {
       privateKey: expectedPrivateKey,
     });
 
-    service.selectAccount(0);
+    await service.selectAccount(0);
     await expect(service.signAndSendTransaction(transaction)).rejects.toThrow(
       "Selected account changed",
     );
     expect(sendTransfer).toHaveBeenCalledTimes(1);
   });
 
+  it("renames, hides, restores, and keeps hidden derivation indexes reserved", async () => {
+    const { storage, getAccountMetadata } = createStorage();
+    const service = new WalletService({ storage });
+    await service.importWallet(TEST_MNEMONIC, "correct horse");
+    const second = await service.addAccount();
+    const third = await service.addAccount();
+
+    await service.selectAccount(second.index);
+    await service.renameAccount(second.index, "Savings");
+    await service.hideAccount(second.index);
+
+    expect(service.getState().selectedAccountIndex).toBe(0);
+    expect(service.getState().accounts[1]).toMatchObject({
+      name: "Savings",
+      hidden: true,
+    });
+    expect(getAccountMetadata()?.accounts[1]).toMatchObject({
+      path: "m/44'/60'/0'/0/1",
+      name: "Savings",
+      hidden: true,
+    });
+
+    await service.hideAccount(0);
+    expect(service.getState().selectedAccountIndex).toBe(third.index);
+    await expect(service.hideAccount(third.index)).rejects.toThrow(
+      "At least one account must remain visible",
+    );
+    await expect(service.selectAccount(second.index)).rejects.toThrow(
+      "Account does not exist",
+    );
+
+    await service.restoreAccount(0);
+    await service.restoreAccount(second.index);
+    expect(service.getState().accounts[1]?.hidden).toBe(false);
+
+    await service.hideAccount(second.index);
+    service.lock();
+    await service.unlock("correct horse");
+    expect(service.getState().accounts.map(({ index, hidden, name }) => ({
+      index,
+      hidden,
+      name,
+    }))).toEqual([
+      { index: 0, hidden: false, name: "Account 1" },
+      { index: 1, hidden: true, name: "Savings" },
+      { index: 2, hidden: false, name: "Account 3" },
+    ]);
+    expect(service.getState().selectedAccountIndex).toBe(third.index);
+
+    const fourth = await service.addAccount();
+    expect(fourth.index).toBe(3);
+  });
+
+  it("migrates an existing vault without account metadata to account 1", async () => {
+    const vault = await encryptVault(TEST_MNEMONIC, "correct horse");
+    const { storage, getAccountMetadata } = createStorage(vault);
+    const service = new WalletService({ storage });
+
+    await service.unlock("correct horse");
+
+    expect(service.getState().selectedAccountIndex).toBe(0);
+    expect(service.getState().accounts).toHaveLength(1);
+    expect(getAccountMetadata()?.accounts).toEqual([
+      {
+        path: "m/44'/60'/0'/0/0",
+        name: "Account 1",
+        hidden: false,
+      },
+    ]);
+  });
+
+  it("restores a visible account when the persisted selection is hidden or stale", async () => {
+    const vault = await encryptVault(TEST_MNEMONIC, "correct horse");
+    const metadata: WalletAccountMetadata = {
+      version: 1,
+      accounts: [
+        { path: "m/44'/60'/0'/0/0", name: "Home", hidden: false },
+        { path: "m/44'/60'/0'/0/1", name: "Hidden savings", hidden: true },
+      ],
+      selectedPath: "m/44'/60'/0'/0/1",
+    };
+    const { storage, getAccountMetadata } = createStorage(vault, metadata);
+    const service = new WalletService({ storage });
+
+    await service.unlock("correct horse");
+
+    expect(service.getState().selectedAccountIndex).toBe(0);
+    expect(getAccountMetadata()?.selectedPath).toBe("m/44'/60'/0'/0/0");
+  });
+
   it("rejects account operations while locked or for an unknown index", async () => {
     const service = new WalletService({ storage: createStorage().storage });
 
-    expect(() => service.addAccount()).toThrow("Wallet is locked");
-    expect(() => service.selectAccount(0)).toThrow("Wallet is locked");
+    await expect(service.addAccount()).rejects.toThrow("Wallet is locked");
+    await expect(service.selectAccount(0)).rejects.toThrow("Wallet is locked");
 
     await service.importWallet(TEST_MNEMONIC, "correct horse");
-    expect(() => service.selectAccount(1)).toThrow("Account does not exist");
+    await expect(service.selectAccount(1)).rejects.toThrow(
+      "Account does not exist",
+    );
   });
 
   it("cancels wallet preparation when locked while checking storage", async () => {
@@ -307,6 +465,9 @@ describe("WalletService", () => {
             resolveHasVault = resolve;
           }),
       ),
+      saveAccountMetadata: vi.fn(async () => undefined),
+      loadAccountMetadata: vi.fn(async () => null),
+      clearAccountMetadata: vi.fn(async () => undefined),
     };
     const service = new WalletService({ storage });
     const preparation = service.prepareWallet();
@@ -329,6 +490,9 @@ describe("WalletService", () => {
             resolveHasVault = resolve;
           }),
       ),
+      saveAccountMetadata: vi.fn(async () => undefined),
+      loadAccountMetadata: vi.fn(async () => null),
+      clearAccountMetadata: vi.fn(async () => undefined),
     };
     const service = new WalletService({ storage });
     const importing = service.importWallet(TEST_MNEMONIC, "correct horse");
