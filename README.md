@@ -70,10 +70,17 @@ links are untrusted public content; only public HTTPS and inline images are
 used, loopback/private hosts are refused, metadata responses are capped at
 256 KiB, and descriptions are rendered as text. A broken or oversized `image`
 field only drops the picture, never the NFT entry. NFT records are public
-display metadata stored per account, not proof of ownership; the wallet does
-not verify holdings or automatically discover NFTs. Removing an entry only
-removes it from the local list and has no on-chain effect. Metadata fetch,
-CORS, or gateway errors are surfaced so the user can retry.
+display metadata stored per account, and ownership is verified on chain: adding
+an entry calls `ownerOf` (ERC-721) or `balanceOf` (ERC-1155) and refuses tokens
+the selected account does not hold, so a token that fails ownership cannot be
+listed. The check is repeated whenever a wallet session starts, the account
+changes, or the NFT list is opened, which removes entries the account no longer
+owns after a transfer. Only a definitive "not owned" answer deletes an entry: a
+reverting `ownerOf` (for example a burned token) or an unreachable RPC keeps the
+entry, so a network hiccup can never silently wipe the list. The wallet still
+never discovers NFTs automatically. Removing an entry only removes it from the
+local list and has no on-chain effect. Metadata fetch, CORS, gateway, or
+ownership-read errors are surfaced so the user can retry.
 
 ## Transaction history
 

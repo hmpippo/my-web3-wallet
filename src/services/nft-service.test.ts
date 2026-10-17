@@ -12,10 +12,13 @@ import {
   normalizeNftAddress,
   parseNftTokenId,
   readNftMetadata,
+  readNftOwnership,
   resolveNftUri,
 } from "./nft-service";
 
 const CONTRACT = "0x0000000000000000000000000000000000000001";
+const OWNER = "0x60228AbA7961736d16C7b9Ed4D109c8749D4fb35";
+const OTHER_OWNER = "0x79eA449c3375eD1a9D7D99f8068209ea748C6d42";
 
 describe("NFT metadata service", () => {
   beforeEach(() => {
@@ -304,5 +307,124 @@ describe("NFT metadata service", () => {
     await expect(
       readNftMetadata(normalizeNftAddress(CONTRACT), BigInt("7"), "ERC-721"),
     ).rejects.toThrow("not valid JSON");
+  });
+});
+
+describe("NFT ownership reads", () => {
+  beforeEach(() => {
+    readContract.mockReset();
+    vi.unstubAllGlobals();
+  });
+
+  it("treats an ERC-721 owner match as owned, ignoring address casing", async () => {
+    readContract.mockResolvedValueOnce(OWNER);
+    await expect(
+      readNftOwnership(
+        normalizeNftAddress(CONTRACT),
+        BigInt("1"),
+        "ERC-721",
+        OWNER,
+      ),
+    ).resolves.toBe(true);
+    expect(readContract).toHaveBeenCalledWith(
+      expect.objectContaining({
+        address: CONTRACT,
+        functionName: "ownerOf",
+        args: [BigInt("1")],
+      }),
+    );
+
+    readContract.mockResolvedValueOnce(OWNER.toLowerCase());
+    await expect(
+      readNftOwnership(
+        normalizeNftAddress(CONTRACT),
+        BigInt("1"),
+        "ERC-721",
+        OWNER.toLowerCase() as `0x${string}`,
+      ),
+    ).resolves.toBe(true);
+  });
+
+  it("reports an ERC-721 token held by another account as not owned", async () => {
+    readContract.mockResolvedValueOnce(OTHER_OWNER);
+    await expect(
+      readNftOwnership(
+        normalizeNftAddress(CONTRACT),
+        BigInt("1"),
+        "ERC-721",
+        OWNER,
+      ),
+    ).resolves.toBe(false);
+  });
+
+  it("uses the ERC-1155 balance for the owner and token ID", async () => {
+    readContract.mockResolvedValueOnce(BigInt("0"));
+    await expect(
+      readNftOwnership(
+        normalizeNftAddress(CONTRACT),
+        BigInt("42"),
+        "ERC-1155",
+        OWNER,
+      ),
+    ).resolves.toBe(false);
+
+    readContract.mockResolvedValueOnce(BigInt("1"));
+    await expect(
+      readNftOwnership(
+        normalizeNftAddress(CONTRACT),
+        BigInt("42"),
+        "ERC-1155",
+        OWNER,
+      ),
+    ).resolves.toBe(true);
+    expect(readContract).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        address: CONTRACT,
+        functionName: "balanceOf",
+        args: [OWNER, BigInt("42")],
+      }),
+    );
+
+    readContract.mockResolvedValueOnce(BigInt("7"));
+    await expect(
+      readNftOwnership(
+        normalizeNftAddress(CONTRACT),
+        BigInt("42"),
+        "ERC-1155",
+        OWNER,
+      ),
+    ).resolves.toBe(true);
+  });
+
+  it("rejects instead of guessing when ownership cannot be determined", async () => {
+    readContract.mockRejectedValueOnce(new Error("execution reverted"));
+    await expect(
+      readNftOwnership(
+        normalizeNftAddress(CONTRACT),
+        BigInt("1"),
+        "ERC-721",
+        OWNER,
+      ),
+    ).rejects.toThrow("execution reverted");
+
+    readContract.mockResolvedValueOnce(BigInt("1"));
+    await expect(
+      readNftOwnership(
+        normalizeNftAddress(CONTRACT),
+        BigInt("1"),
+        "ERC-721",
+        OWNER,
+      ),
+    ).rejects.toThrow("owner address");
+
+    readContract.mockResolvedValueOnce("1");
+    await expect(
+      readNftOwnership(
+        normalizeNftAddress(CONTRACT),
+        BigInt("1"),
+        "ERC-1155",
+        OWNER,
+      ),
+    ).rejects.toThrow("ERC-1155 balance");
   });
 });

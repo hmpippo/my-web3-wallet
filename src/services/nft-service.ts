@@ -31,15 +31,51 @@ const MULTI_TOKEN_ABI = [
     outputs: [{ name: "", type: "string" }],
   },
 ] as const;
+const NFT_OWNER_ABI = [
+  {
+    type: "function",
+    name: "ownerOf",
+    stateMutability: "view",
+    inputs: [{ name: "tokenId", type: "uint256" }],
+    outputs: [{ name: "", type: "address" }],
+  },
+] as const;
+const MULTI_TOKEN_BALANCE_ABI = [
+  {
+    type: "function",
+    name: "balanceOf",
+    stateMutability: "view",
+    inputs: [
+      { name: "account", type: "address" },
+      { name: "id", type: "uint256" },
+    ],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+] as const;
+
+export interface NftReadRequest {
+  address: Address;
+  abi:
+    | typeof NFT_ABI
+    | typeof MULTI_TOKEN_ABI
+    | typeof NFT_OWNER_ABI
+    | typeof MULTI_TOKEN_BALANCE_ABI;
+  functionName: "tokenURI" | "uri" | "ownerOf" | "balanceOf";
+  args: readonly [bigint] | readonly [Address, bigint];
+}
 
 export interface NftServiceDependencies {
-  readContract?: (params: {
-    address: Address;
-    abi: typeof NFT_ABI | typeof MULTI_TOKEN_ABI;
-    functionName: "tokenURI" | "uri";
-    args: readonly [bigint];
-  }) => Promise<unknown>;
+  readContract?: (params: NftReadRequest) => Promise<unknown>;
   fetch?: typeof fetch;
+}
+
+function resolveReadContract(
+  dependencies: NftServiceDependencies,
+): NonNullable<NftServiceDependencies["readContract"]> {
+  return (
+    dependencies.readContract ??
+    ((params) => publicClient.readContract(params as never) as Promise<unknown>)
+  );
 }
 
 export interface NftIdentity {
@@ -153,10 +189,7 @@ export async function readNftMetadata(
   standard: NftStandard,
   dependencies: NftServiceDependencies = {},
 ): Promise<StoredWalletNft> {
-  const readContract =
-    dependencies.readContract ??
-    ((params: Parameters<typeof publicClient.readContract>[0]) =>
-      publicClient.readContract(params));
+  const readContract = resolveReadContract(dependencies);
   const requestFetch = dependencies.fetch ?? globalThis.fetch;
   try {
     const uriResult =
@@ -208,6 +241,51 @@ export async function readNftMetadata(
       }`.trim(),
     );
   }
+}
+
+/**
+ * Reads whether `owner` currently holds `tokenId` of `address`.
+ *
+ * Returns `true` when the contract confirms the balance/owner, `false` when the
+ * contract definitively answers that someone else holds it, and throws when the
+ * answer cannot be determined (a reverting call, a bad response shape, or a
+ * transport error).
+ *
+ * That three-way result is what lets callers pick opposite failure policies:
+ * adding an NFT must fail closed (reject anything unproven), while pruning the
+ * locally stored list must fail open (never delete an entry just because the
+ * RPC was unreachable).
+ */
+export async function readNftOwnership(
+  address: Address,
+  tokenId: bigint,
+  standard: NftStandard,
+  owner: Address,
+  dependencies: NftServiceDependencies = {},
+): Promise<boolean> {
+  const readContract = resolveReadContract(dependencies);
+  if (standard === "ERC-721") {
+    const tokenOwner = await readContract({
+      address,
+      abi: NFT_OWNER_ABI,
+      functionName: "ownerOf",
+      args: [tokenId],
+    });
+    if (typeof tokenOwner !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(tokenOwner)) {
+      throw new Error("The contract did not return a valid owner address.");
+    }
+    return getAddress(tokenOwner.toLowerCase()) === getAddress(owner.toLowerCase());
+  }
+  const balance = await readContract({
+    address,
+    abi: MULTI_TOKEN_BALANCE_ABI,
+    functionName: "balanceOf",
+    args: [owner, tokenId],
+  });
+  if (typeof balance !== "bigint") {
+    throw new Error("The contract did not return a valid ERC-1155 balance.");
+  }
+  return balance > BigInt(0);
 }
 
 async function fetchNftJson(

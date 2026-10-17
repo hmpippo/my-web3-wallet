@@ -548,6 +548,7 @@ describe("WalletService", () => {
     const service = new WalletService({
       storage,
       readNftMetadata: readMetadata,
+      readNftOwnership: vi.fn(async () => true),
     });
     await service.importWallet(TEST_MNEMONIC, "correct horse");
     await service.addAccount();
@@ -609,6 +610,7 @@ describe("WalletService", () => {
       readNftMetadata: vi.fn(async () => {
         throw new Error("NFT metadata could not be loaded");
       }),
+      readNftOwnership: vi.fn(async () => true),
     });
     await service.importWallet(TEST_MNEMONIC, "correct horse");
 
@@ -624,6 +626,245 @@ describe("WalletService", () => {
     ).rejects.toThrow("NFT metadata could not be loaded");
     expect(service.getState().accounts[0]?.nfts).toEqual([]);
     expect(getAccountMetadata()?.accounts[0]?.nfts).toBeUndefined();
+  });
+
+  it("refuses to list an NFT the selected account does not own", async () => {
+    const { storage, getAccountMetadata } = createStorage();
+    const readMetadata = vi.fn(async () => {
+      throw new Error("should not read metadata for an unowned token");
+    });
+    const readOwnership = vi.fn(async () => false);
+    const service = new WalletService({
+      storage,
+      readNftMetadata: readMetadata,
+      readNftOwnership: readOwnership,
+    });
+    await service.importWallet(TEST_MNEMONIC, "correct horse");
+
+    await expect(
+      service.addNft(
+        "0x0000000000000000000000000000000000000001",
+        "42",
+        "ERC-721",
+      ),
+    ).rejects.toThrow("does not own");
+    expect(readOwnership).toHaveBeenCalledWith(
+      "0x0000000000000000000000000000000000000001",
+      BigInt("42"),
+      "ERC-721",
+      EXPECTED_ADDRESS,
+    );
+    expect(readMetadata).not.toHaveBeenCalled();
+    expect(service.getState().accounts[0]?.nfts).toEqual([]);
+    expect(getAccountMetadata()?.accounts[0]?.nfts).toBeUndefined();
+  });
+
+  it("fails closed when NFT ownership cannot be read", async () => {
+    const { storage, getAccountMetadata } = createStorage();
+    const service = new WalletService({
+      storage,
+      readNftMetadata: vi.fn(async () => {
+        throw new Error("should not read metadata when ownership is unknown");
+      }),
+      readNftOwnership: vi.fn(async () => {
+        throw new Error("execution reverted");
+      }),
+    });
+    await service.importWallet(TEST_MNEMONIC, "correct horse");
+
+    await expect(
+      service.addNft(
+        "0x0000000000000000000000000000000000000001",
+        "42",
+        "ERC-1155",
+      ),
+    ).rejects.toThrow(/Could not verify NFT ownership.*execution reverted/);
+    expect(service.getState().accounts[0]?.nfts).toEqual([]);
+    expect(getAccountMetadata()?.accounts[0]?.nfts).toBeUndefined();
+  });
+
+  it("drops listed NFTs this account no longer owns and persists the result", async () => {
+    const { storage, getAccountMetadata } = createStorage();
+    let transferredContract: string | null = null;
+    const readOwnership = vi.fn(
+      async (address: string) => address.toLowerCase() !== transferredContract,
+    );
+    const service = new WalletService({
+      storage,
+      readNftMetadata: vi.fn(async (address, tokenId, standard) => ({
+        address,
+        tokenId: tokenId.toString(),
+        standard,
+        name: "Test NFT",
+        description: "Locally listed metadata",
+        imageUrl: "https://example.com/nft.png",
+      })),
+      readNftOwnership: readOwnership,
+    });
+    await service.importWallet(TEST_MNEMONIC, "correct horse");
+    await service.addNft(
+      "0x0000000000000000000000000000000000000001",
+      "1",
+      "ERC-721",
+    );
+    await service.addNft(
+      "0x0000000000000000000000000000000000000002",
+      "7",
+      "ERC-1155",
+    );
+
+    // The ERC-1155 token was transferred away in the meantime.
+    transferredContract = "0x0000000000000000000000000000000000000002";
+    await service.syncNftOwnership();
+
+    expect(service.getState().accounts[0]?.nfts).toMatchObject([
+      {
+        address: "0x0000000000000000000000000000000000000001",
+        tokenId: "1",
+        standard: "ERC-721",
+      },
+    ]);
+    expect(getAccountMetadata()?.accounts[0]?.nfts).toMatchObject([
+      {
+        address: "0x0000000000000000000000000000000000000001",
+        tokenId: "1",
+        standard: "ERC-721",
+      },
+    ]);
+    expect(readOwnership).toHaveBeenLastCalledWith(
+      "0x0000000000000000000000000000000000000002",
+      BigInt("7"),
+      "ERC-1155",
+      EXPECTED_ADDRESS,
+    );
+  });
+
+  it("keeps listed NFTs when ownership cannot be re-checked", async () => {
+    const { storage, getAccountMetadata } = createStorage();
+    const readOwnership = vi.fn(async () => true);
+    const service = new WalletService({
+      storage,
+      readNftMetadata: vi.fn(async (address, tokenId, standard) => ({
+        address,
+        tokenId: tokenId.toString(),
+        standard,
+        name: "Test NFT",
+        description: "Locally listed metadata",
+        imageUrl: "https://example.com/nft.png",
+      })),
+      readNftOwnership: readOwnership,
+    });
+    await service.importWallet(TEST_MNEMONIC, "correct horse");
+    await service.addNft(
+      "0x0000000000000000000000000000000000000001",
+      "1",
+      "ERC-721",
+    );
+
+    readOwnership.mockRejectedValue(new Error("rpc unavailable"));
+    await service.syncNftOwnership();
+
+    expect(service.getState().accounts[0]?.nfts).toHaveLength(1);
+    expect(getAccountMetadata()?.accounts[0]?.nfts).toHaveLength(1);
+  });
+
+  it("does not re-check ownership while the wallet is locked", async () => {
+    const { storage } = createStorage();
+    const readOwnership = vi.fn(async () => false);
+    const service = new WalletService({
+      storage,
+      readNftOwnership: readOwnership,
+    });
+
+    await service.syncNftOwnership();
+
+    expect(readOwnership).not.toHaveBeenCalled();
+    expect(service.getState().accounts).toEqual([]);
+  });
+
+  it("removes stale entries as soon as a wallet session starts", async () => {
+    const { storage, getAccountMetadata } = createStorage();
+    const readOwnership = vi.fn(async () => true);
+    const service = new WalletService({
+      storage,
+      readNftMetadata: vi.fn(async (address, tokenId, standard) => ({
+        address,
+        tokenId: tokenId.toString(),
+        standard,
+        name: "Test NFT",
+        description: "Locally listed metadata",
+        imageUrl: "https://example.com/nft.png",
+      })),
+      readNftOwnership: readOwnership,
+    });
+    await service.importWallet(TEST_MNEMONIC, "correct horse");
+    await service.addNft(
+      "0x0000000000000000000000000000000000000002",
+      "7",
+      "ERC-721",
+    );
+
+    // The token was transferred away while the wallet was locked, so unlocking
+    // again must drop the now stale entry.
+    readOwnership.mockResolvedValue(false);
+    service.lock();
+    await service.unlock("correct horse");
+    expect(service.getState().accounts[0]?.nfts).toHaveLength(1);
+
+    await vi.waitFor(() => {
+      expect(service.getState().accounts[0]?.nfts).toEqual([]);
+    });
+    expect(getAccountMetadata()?.accounts[0]?.nfts).toEqual([]);
+  });
+
+  it("keeps an NFT added while ownership re-checks are in flight", async () => {
+    const { storage } = createStorage();
+    let releaseStaleRead: (() => void) | undefined;
+    const staleRead = new Promise<void>((resolve) => {
+      releaseStaleRead = resolve;
+    });
+    const readOwnership = vi.fn(async () => true);
+    const service = new WalletService({
+      storage,
+      readNftMetadata: vi.fn(async (address, tokenId, standard) => ({
+        address,
+        tokenId: tokenId.toString(),
+        standard,
+        name: "Test NFT",
+        description: "Locally listed metadata",
+        imageUrl: "https://example.com/nft.png",
+      })),
+      readNftOwnership: readOwnership,
+    });
+    await service.importWallet(TEST_MNEMONIC, "correct horse");
+    await service.addNft(
+      "0x0000000000000000000000000000000000000001",
+      "1",
+      "ERC-721",
+    );
+
+    // The re-check of the older entry hangs and then reports it as unowned.
+    readOwnership.mockImplementationOnce(async () => {
+      await staleRead;
+      return false;
+    });
+    const sync = service.syncNftOwnership();
+
+    await service.addNft(
+      "0x0000000000000000000000000000000000000002",
+      "7",
+      "ERC-1155",
+    );
+    releaseStaleRead?.();
+    await sync;
+
+    expect(service.getState().accounts[0]?.nfts).toMatchObject([
+      {
+        address: "0x0000000000000000000000000000000000000002",
+        tokenId: "7",
+        standard: "ERC-1155",
+      },
+    ]);
   });
 
   it("rejects account operations while locked or for an unknown index", async () => {

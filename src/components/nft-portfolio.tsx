@@ -121,8 +121,10 @@ export function NftPortfolio({ nfts }: NftPortfolioProps) {
           </button>
         </div>
         <p className="field-help">
-          Metadata is read from the selected contract. Ownership is not checked;
-          only public display details are saved locally.
+          Metadata is read from the selected contract and ownership is verified
+          on chain for the selected account before anything is saved. Entries
+          this account no longer owns are removed automatically when the list is
+          opened.
         </p>
       </form>
 

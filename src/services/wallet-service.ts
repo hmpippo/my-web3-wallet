@@ -25,6 +25,7 @@ import {
   normalizeNftAddress,
   parseNftTokenId,
   readNftMetadata,
+  readNftOwnership,
 } from "./nft-service";
 import {
   normalizeTokenAddress,
@@ -63,6 +64,12 @@ export interface WalletServiceDependencies {
     tokenId: bigint,
     standard: NftStandard,
   ) => Promise<StoredWalletNft>;
+  readNftOwnership?: (
+    address: Address,
+    tokenId: bigint,
+    standard: NftStandard,
+    owner: Address,
+  ) => Promise<boolean>;
   sendTransfer?: (params: {
     to: Address;
     value: bigint;
@@ -91,6 +98,7 @@ export class WalletService {
   private operationVersion = 0;
   private accountMutationVersion = 0;
   private accountMutationInProgress = false;
+  private nftOwnershipSyncInProgress = false;
   private walletCreationInProgress = false;
   private readonly listeners = new Set<() => void>();
   private readonly storage: StorageService;
@@ -103,12 +111,16 @@ export class WalletService {
   private readonly readNftMetadata: NonNullable<
     WalletServiceDependencies["readNftMetadata"]
   >;
+  private readonly readNftOwnership: NonNullable<
+    WalletServiceDependencies["readNftOwnership"]
+  >;
 
   constructor(dependencies: WalletServiceDependencies = {}) {
     this.storage = dependencies.storage ?? storageService;
     this.sendTransfer = dependencies.sendTransfer ?? sendNativeTransfer;
     this.readTokenMetadata = dependencies.readTokenMetadata ?? readTokenMetadata;
     this.readNftMetadata = dependencies.readNftMetadata ?? readNftMetadata;
+    this.readNftOwnership = dependencies.readNftOwnership ?? readNftOwnership;
   }
 
   get isUnlocked(): boolean {
@@ -322,6 +334,7 @@ export class WalletService {
     this.operationVersion += 1;
     this.accountMutationVersion += 1;
     this.accountMutationInProgress = false;
+    this.nftOwnershipSyncInProgress = false;
     this.seed?.fill(0);
     this.seed = null;
     this.privateKeys.clear();
@@ -387,6 +400,7 @@ export class WalletService {
     } finally {
       this.finishAccountMutation(mutationVersion);
     }
+    void this.syncNftOwnership();
   }
 
   async renameAccount(index: number, name: string): Promise<void> {
@@ -544,6 +558,13 @@ export class WalletService {
     const mutationVersion = this.beginAccountMutation();
     const operationVersion = this.operationVersion;
     try {
+      await this.assertNftOwned(
+        address,
+        BigInt(tokenId),
+        standard,
+        account.address,
+      );
+      this.assertOperationCurrent(operationVersion);
       const nft = await this.readNftMetadata(
         address,
         BigInt(tokenId),
@@ -625,6 +646,84 @@ export class WalletService {
     }
   }
 
+  /**
+   * Drops locally listed NFTs that this account definitively no longer owns.
+   *
+   * Runs after a wallet session starts (unlock / import) and whenever the
+   * selected account changes or the NFT list is opened, so a token transferred
+   * away in the meantime leaves the account on the next refresh.
+   *
+   * Pruning is deliberately fail-open: only a contract that answers "somebody
+   * else owns it" (or an ERC-1155 balance of zero) removes an entry. A read that
+   * fails for any reason — network trouble, a reverting `ownerOf` for a burned
+   * token, a wrong standard tag — keeps the NFT, so a flaky RPC can never wipe
+   * the stored list.
+   *
+   * Best-effort by design: it never rejects, because callers fire it without
+   * awaiting. Awaiting the returned promise waits for the reconciliation.
+   */
+  async syncNftOwnership(): Promise<void> {
+    if (this.nftOwnershipSyncInProgress) return;
+    this.nftOwnershipSyncInProgress = true;
+    try {
+      if (!this.state.isUnlocked) return;
+      const account = this.state.accounts.find(
+        (candidate) => candidate.index === this.state.selectedAccountIndex,
+      );
+      if (!account || account.nfts.length === 0) return;
+      const operationVersion = this.operationVersion;
+
+      // The network reads happen outside the mutation guard: a slow RPC must
+      // never block the user from adding or removing an entry.
+      const unowned = new Set<string>();
+      for (const nft of account.nfts) {
+        if (operationVersion !== this.operationVersion) return;
+        try {
+          const owned = await this.readNftOwnership(
+            nft.address,
+            BigInt(nft.tokenId),
+            nft.standard,
+            account.address,
+          );
+          if (!owned) unowned.add(nftIdentity(nft));
+        } catch {
+          // Unverifiable: keep the entry.
+        }
+      }
+      if (unowned.size === 0) return;
+      if (this.accountMutationInProgress) return;
+
+      const mutationVersion = this.beginAccountMutation();
+      try {
+        // Re-read state and filter by identity so an NFT added while the reads
+        // were in flight is not clobbered.
+        const target = this.state.accounts.find(
+          (candidate) => candidate.index === account.index,
+        );
+        if (!target) return;
+        const kept = target.nfts.filter(
+          (nft) => !unowned.has(nftIdentity(nft)),
+        );
+        if (kept.length === target.nfts.length) return;
+        const accounts = this.state.accounts.map((candidate) =>
+          candidate.index === account.index
+            ? { ...candidate, nfts: kept }
+            : candidate,
+        );
+        const selectedIndex = this.state.selectedAccountIndex;
+        await this.persistAccounts(accounts, selectedIndex);
+        if (operationVersion !== this.operationVersion) return;
+        this.updateState(true, accounts, selectedIndex);
+      } finally {
+        this.finishAccountMutation(mutationVersion);
+      }
+    } catch {
+      // Housekeeping only: a failed prune leaves the stored list untouched.
+    } finally {
+      this.nftOwnershipSyncInProgress = false;
+    }
+  }
+
   private async setTokenVisibility(
     address: Address,
     hidden: boolean,
@@ -698,6 +797,27 @@ export class WalletService {
     }
   }
 
+  private async assertNftOwned(
+    address: Address,
+    tokenId: bigint,
+    standard: NftStandard,
+    owner: Address,
+  ): Promise<void> {
+    let owned: boolean;
+    try {
+      owned = await this.readNftOwnership(address, tokenId, standard, owner);
+    } catch (error) {
+      throw new Error(
+        `Could not verify NFT ownership. Confirm the contract, token ID, and standard, then retry.${
+          error instanceof Error && error.message ? ` ${error.message}` : ""
+        }`,
+      );
+    }
+    if (!owned) {
+      throw new Error("This account does not own that NFT token.");
+    }
+  }
+
   private assertNoWalletCreationInProgress(): void {
     if (this.walletCreationInProgress) {
       throw new Error("Wallet creation is already in progress");
@@ -715,6 +835,9 @@ export class WalletService {
     this.privateKeys.clear();
     this.privateKeys.set(selectedIndex, privateKey);
     this.updateState(true, accounts, selectedIndex);
+    // A wallet session just started: reconcile the stored NFT list against the
+    // chain in the background (see syncNftOwnership).
+    void this.syncNftOwnership();
   }
 
   private async persistAccounts(
@@ -813,6 +936,10 @@ async function deriveAccountFromMnemonic(mnemonic: string, index: number) {
     seed.fill(0);
     throw error;
   }
+}
+
+function nftIdentity(nft: StoredWalletNft): string {
+  return `${nft.address.toLowerCase()}:${nft.tokenId}:${nft.standard}`;
 }
 
 function createWalletAccount(index: number, address: Address): WalletAccount {

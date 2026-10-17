@@ -100,6 +100,13 @@ export function WalletDashboard() {
     };
   }, [address]);
 
+  // Opening the NFT list (or switching account) re-checks ownership on chain so
+  // a token transferred away in the meantime disappears from the account.
+  useEffect(() => {
+    if (activePortfolioTab !== "nfts" || !address) return;
+    void walletService.syncNftOwnership();
+  }, [activePortfolioTab, address]);
+
   async function handleAddAccount() {
     try {
       setAccountError(null);
