@@ -820,8 +820,6 @@ input {
 .token-add-form {
   display: grid;
   gap: 0.5rem;
-  border-bottom: 1px solid var(--line);
-  padding-bottom: 1.25rem;
 }
 
 .token-add-form > label {
@@ -855,6 +853,7 @@ input {
 
 .token-add-controls .button {
   min-height: 2.75rem;
+  margin-top: 0;
 }
 
 .token-empty {
@@ -868,8 +867,7 @@ input {
   list-style: none;
 }
 
-.token-item,
-.hidden-token-row {
+.token-item {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(8rem, auto) auto;
   align-items: center;
@@ -933,22 +931,124 @@ input {
   gap: 0.9rem;
 }
 
-.token-management {
-  margin-top: 1rem;
-}
-
-.hidden-token-list {
-  display: grid;
-  margin-top: 0.5rem;
-}
-
-.hidden-token-row {
+.token-item-manage {
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
-.hidden-token-row .button {
-  min-height: 2.25rem;
-  font-size: 0.72rem;
+/* Token visibility switches and the Tokens overflow menu. */
+.manage-token-import {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 1.5rem;
+}
+
+.toggle-switch {
+  position: relative;
+  width: 2.6rem;
+  height: 1.5rem;
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 999px;
+  background: #cdd6d0;
+  cursor: pointer;
+  padding: 0;
+  transition: background 140ms ease;
+}
+
+.toggle-switch[aria-checked="true"] {
+  background: var(--accent);
+}
+
+.toggle-switch:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.toggle-switch:focus-visible {
+  outline: 3px solid rgb(20 107 75 / 25%);
+  outline-offset: 2px;
+}
+
+.toggle-switch-knob {
+  position: absolute;
+  top: 0.18rem;
+  left: 0.18rem;
+  width: 1.14rem;
+  height: 1.14rem;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 1px 3px rgb(27 54 39 / 30%);
+  transition: transform 140ms ease;
+}
+
+.toggle-switch[aria-checked="true"] .toggle-switch-knob {
+  transform: translateX(1.1rem);
+}
+
+.token-menu {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.token-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+  background: white;
+  color: var(--foreground);
+  cursor: pointer;
+  padding: 0;
+}
+
+.token-menu-trigger:hover {
+  border-color: #a7beb0;
+  background: #f8fbf9;
+}
+
+.token-menu-trigger:focus-visible {
+  outline: 3px solid rgb(20 107 75 / 12%);
+  outline-offset: 1px;
+}
+
+.token-menu-trigger svg {
+  width: 1.15rem;
+  height: 1.15rem;
+}
+
+.token-menu-dropdown {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  right: 0;
+  z-index: 20;
+  display: grid;
+  min-width: 11rem;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: var(--surface);
+  padding: 0.35rem;
+  box-shadow: 0 0.8rem 2rem rgb(27 54 39 / 12%);
+}
+
+.token-menu-item {
+  border: 0;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--foreground);
+  cursor: pointer;
+  padding: 0.6rem 0.7rem;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-align: left;
+  text-decoration: none;
+}
+
+.token-menu-item:hover {
+  background: #f1f5f2;
 }
 
 .nft-card {

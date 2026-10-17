@@ -1,19 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-  type FormEvent,
-} from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatEther, type Address } from "viem";
 import type { StoredWalletToken } from "@/core/storage";
 import { getNativeBalance } from "@/services/balance-service";
 import { getTokenBalance } from "@/services/token-service";
-import { walletService } from "@/services/wallet-service";
 import { CopyButton } from "@/components/copy-button";
+import { TokenMenu } from "@/components/token-menu";
 
 const NATIVE_KEY = "native";
 
@@ -32,20 +26,12 @@ export function TokenPortfolio({
   accountAddress,
   tokens,
 }: TokenPortfolioProps) {
-  const [contractAddress, setContractAddress] = useState("");
-  const [isAdding, setIsAdding] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [balances, setBalances] = useState<Record<string, TokenBalanceState>>(
     {},
   );
-  const [isManagingTokens, setIsManagingTokens] = useState(false);
 
   const visibleTokens = useMemo(
     () => tokens.filter((token) => !token.hidden),
-    [tokens],
-  );
-  const hiddenTokens = useMemo(
-    () => tokens.filter((token) => token.hidden),
     [tokens],
   );
 
@@ -99,6 +85,13 @@ export function TokenPortfolio({
     },
     [accountAddress],
   );
+
+  const refreshList = useCallback(() => {
+    void Promise.all([
+      refreshNativeBalance(),
+      ...visibleTokens.map(refreshBalance),
+    ]);
+  }, [refreshNativeBalance, refreshBalance, visibleTokens]);
 
   useEffect(() => {
     let cancelled = false;
@@ -160,41 +153,6 @@ export function TokenPortfolio({
     };
   }, [accountAddress, visibleTokens]);
 
-  async function addToken(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError(null);
-    setIsAdding(true);
-    try {
-      await walletService.addToken(contractAddress);
-      setContractAddress("");
-    } catch (caught) {
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : "Could not add this token contract.",
-      );
-    } finally {
-      setIsAdding(false);
-    }
-  }
-
-  async function changeVisibility(token: StoredWalletToken, hidden: boolean) {
-    setError(null);
-    try {
-      if (hidden) {
-        await walletService.restoreToken(token.address);
-      } else {
-        await walletService.hideToken(token.address);
-      }
-    } catch (caught) {
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : "Could not update the token visibility.",
-      );
-    }
-  }
-
   return (
     <section className="history-card token-card" aria-labelledby="tokens-heading">
       <div className="history-heading">
@@ -202,50 +160,8 @@ export function TokenPortfolio({
           <p className="eyebrow">Sepolia assets</p>
           <h2 id="tokens-heading">Tokens</h2>
         </div>
-        <button
-          className="text-link"
-          onClick={() =>
-            void Promise.all([
-              refreshNativeBalance(),
-              ...visibleTokens.map(refreshBalance),
-            ])
-          }
-          type="button"
-        >
-          Refresh balances
-        </button>
+        <TokenMenu onRefresh={refreshList} />
       </div>
-
-      <form className="token-add-form" onSubmit={addToken}>
-        <label htmlFor="token-contract-address">Add ERC-20 token</label>
-        <div className="token-add-controls">
-          <input
-            autoComplete="off"
-            id="token-contract-address"
-            onChange={(event) => setContractAddress(event.target.value)}
-            placeholder="Token contract address"
-            required
-            spellCheck={false}
-            value={contractAddress}
-          />
-          <button
-            className="button button-primary"
-            disabled={isAdding}
-            type="submit"
-          >
-            {isAdding ? "Checking..." : "Add token"}
-          </button>
-        </div>
-        <p className="field-help">
-          Token name, symbol, and decimals are verified from the Sepolia contract.
-        </p>
-      </form>
-
-      {error ? (
-        <p className="form-error" role="alert">
-          {error}
-        </p>
-      ) : null}
 
       <ul className="token-list" aria-label="Tokens">
         <li className="token-item token-item-native">
@@ -320,14 +236,6 @@ export function TokenPortfolio({
                 >
                   Send
                 </Link>
-                <button
-                  aria-label={`Hide ${token.name}`}
-                  className="text-button"
-                  onClick={() => void changeVisibility(token, false)}
-                  type="button"
-                >
-                  Hide
-                </button>
               </div>
             </li>
           );
@@ -338,49 +246,6 @@ export function TokenPortfolio({
           Add an ERC-20 contract address to track more tokens.
         </p>
       ) : null}
-
-      <div className="token-management">
-        <button
-          aria-controls="hidden-token-list"
-          aria-expanded={isManagingTokens}
-          className="text-link"
-          onClick={() => setIsManagingTokens((open) => !open)}
-          type="button"
-        >
-          {isManagingTokens ? "Close token management" : "Manage hidden tokens"}
-        </button>
-        {isManagingTokens ? (
-          <div className="hidden-token-list" id="hidden-token-list">
-            {hiddenTokens.length === 0 ? (
-              <p className="muted-copy">No hidden tokens for this account.</p>
-            ) : (
-              hiddenTokens.map((token) => (
-                <div className="hidden-token-row" key={token.address}>
-                  <div className="token-identity">
-                    <strong>{token.name}</strong>
-                    <span>{token.symbol}</span>
-                    <div className="address-line">
-                      <code>{token.address}</code>
-                      <CopyButton
-                        label={`${token.symbol} contract address`}
-                        value={token.address}
-                      />
-                    </div>
-                  </div>
-                  <button
-                    aria-label={`Show ${token.name}`}
-                    className="button button-outline"
-                    onClick={() => void changeVisibility(token, true)}
-                    type="button"
-                  >
-                    Show
-                  </button>
-                </div>
-              ))
-            )}
-          </div>
-        ) : null}
-      </div>
     </section>
   );
 }
