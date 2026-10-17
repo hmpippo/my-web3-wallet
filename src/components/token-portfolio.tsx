@@ -7,7 +7,7 @@ import type { StoredWalletToken } from "@/core/storage";
 import { getNativeBalance } from "@/services/balance-service";
 import { getTokenBalance } from "@/services/token-service";
 import { CopyButton } from "@/components/copy-button";
-import { TokenMenu } from "@/components/token-menu";
+import { OverflowMenu } from "@/components/overflow-menu";
 
 const NATIVE_KEY = "native";
 
@@ -160,7 +160,13 @@ export function TokenPortfolio({
           <p className="eyebrow">Sepolia assets</p>
           <h2 id="tokens-heading">Tokens</h2>
         </div>
-        <TokenMenu onRefresh={refreshList} />
+        <OverflowMenu
+          label="Token list options"
+          items={[
+            { label: "Refresh list", onClick: refreshList },
+            { label: "Manage tokens", href: "/tokens" },
+          ]}
+        />
       </div>
 
       <ul className="token-list" aria-label="Tokens">

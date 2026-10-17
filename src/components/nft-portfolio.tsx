@@ -1,43 +1,20 @@
 "use client";
 
 import Image from "next/image";
-import { useState, type FormEvent } from "react";
-import type { NftStandard, StoredWalletNft } from "@/core/storage";
+import { useState } from "react";
+import type { StoredWalletNft } from "@/core/storage";
 import { walletService } from "@/services/wallet-service";
 import { CopyButton } from "@/components/copy-button";
+import { OverflowMenu } from "@/components/overflow-menu";
 
 interface NftPortfolioProps {
   nfts: readonly StoredWalletNft[];
 }
 
 export function NftPortfolio({ nfts }: NftPortfolioProps) {
-  const [contractAddress, setContractAddress] = useState("");
-  const [tokenId, setTokenId] = useState("");
-  const [standard, setStandard] = useState<NftStandard>("ERC-721");
   const [selectedNft, setSelectedNft] = useState<StoredWalletNft | null>(null);
-  const [isAdding, setIsAdding] = useState(false);
   const [removingKey, setRemovingKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  async function addNft(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError(null);
-    setIsAdding(true);
-    try {
-      const nft = await walletService.addNft(contractAddress, tokenId, standard);
-      setContractAddress("");
-      setTokenId("");
-      setSelectedNft(nft);
-    } catch (caught) {
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : "Could not load this NFT's metadata. Check the details and retry.",
-      );
-    } finally {
-      setIsAdding(false);
-    }
-  }
 
   async function removeNft(nft: StoredWalletNft) {
     const key = nftKey(nft);
@@ -75,59 +52,17 @@ export function NftPortfolio({ nfts }: NftPortfolioProps) {
           <p className="eyebrow">Sepolia assets</p>
           <h2 id="nfts-heading">NFTs</h2>
         </div>
+        <OverflowMenu
+          label="NFT list options"
+          items={[
+            {
+              label: "Refresh list",
+              onClick: () => void walletService.syncNftOwnership(),
+            },
+            { label: "Import NFT", href: "/nfts/import" },
+          ]}
+        />
       </div>
-
-      <form className="nft-add-form" onSubmit={addNft}>
-        <label htmlFor="nft-contract-address">Add an NFT</label>
-        <div className="nft-add-controls">
-          <input
-            autoComplete="off"
-            id="nft-contract-address"
-            onChange={(event) => setContractAddress(event.target.value)}
-            placeholder="NFT contract address"
-            required
-            spellCheck={false}
-            value={contractAddress}
-          />
-          <input
-            autoComplete="off"
-            aria-label="NFT token ID"
-            inputMode="numeric"
-            onChange={(event) => setTokenId(event.target.value)}
-            placeholder="Token ID"
-            required
-            value={tokenId}
-          />
-          <select
-            aria-label="NFT standard"
-            onChange={(event) => {
-              if (
-                event.target.value === "ERC-721" ||
-                event.target.value === "ERC-1155"
-              ) {
-                setStandard(event.target.value);
-              }
-            }}
-            value={standard}
-          >
-            <option value="ERC-721">ERC-721</option>
-            <option value="ERC-1155">ERC-1155</option>
-          </select>
-          <button
-            className="button button-primary"
-            disabled={isAdding}
-            type="submit"
-          >
-            {isAdding ? "Loading metadata..." : "Add NFT"}
-          </button>
-        </div>
-        <p className="field-help">
-          Metadata is read from the selected contract and ownership is verified
-          on chain for the selected account before anything is saved. Entries
-          this account no longer owns are removed automatically when the list is
-          opened.
-        </p>
-      </form>
 
       {error ? (
         <p className="form-error nft-error" role="alert">
@@ -137,7 +72,7 @@ export function NftPortfolio({ nfts }: NftPortfolioProps) {
 
       {nfts.length === 0 ? (
         <p className="muted-copy token-empty">
-          No NFTs added for this account yet. Add a contract, token ID, and
+          No NFTs added for this account yet. Import a contract, token ID, and
           standard to load its metadata.
         </p>
       ) : (

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   useEffect,
   useState,
@@ -17,6 +17,7 @@ import { NftPortfolio } from "@/components/nft-portfolio";
 
 export function WalletDashboard() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const walletState = useSyncExternalStore(
     walletService.subscribe,
     () => walletService.getState(),
@@ -31,9 +32,15 @@ export function WalletDashboard() {
   const [draftAccountName, setDraftAccountName] = useState("");
   const [isSavingAccount, setIsSavingAccount] = useState(false);
   const [showReceiveNote, setShowReceiveNote] = useState(false);
+  // Allows a deep link such as /wallet?tab=nfts to open on a specific tab.
   const [activePortfolioTab, setActivePortfolioTab] = useState<
     "tokens" | "nfts" | "activity"
-  >("tokens");
+  >(() => {
+    const requestedTab = searchParams.get("tab");
+    return requestedTab === "nfts" || requestedTab === "activity"
+      ? requestedTab
+      : "tokens";
+  });
   const visibleAccounts = walletState.accounts.filter((account) => !account.hidden);
   const selectedAccount = walletState.accounts.find(
     (account) => account.index === walletState.selectedAccountIndex,
