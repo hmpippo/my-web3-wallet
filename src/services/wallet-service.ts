@@ -1,5 +1,8 @@
 import type { Address, Hash, Hex } from "viem";
-import type { NativeTransferEstimate } from "./transaction-service";
+import type {
+  Erc20TransferEstimate,
+  NativeTransferEstimate,
+} from "./transaction-service";
 import {
   decryptVault,
   encryptVault,
@@ -20,7 +23,7 @@ import {
   type StorageService,
   type WalletAccountMetadata,
 } from "@/core/storage";
-import { sendNativeTransfer } from "./transaction-service";
+import { sendErc20Transfer, sendNativeTransfer } from "./transaction-service";
 import {
   normalizeNftAddress,
   parseNftTokenId,
@@ -77,6 +80,14 @@ export interface WalletServiceDependencies {
     gas?: bigint;
     gasPrice?: bigint;
   }) => Promise<Hash>;
+  sendTokenTransfer?: (params: {
+    token: Address;
+    to: Address;
+    amount: bigint;
+    privateKey: Hex;
+    gas?: bigint;
+    gasPrice?: bigint;
+  }) => Promise<Hash>;
 }
 
 interface PendingWallet extends PreparedWallet {
@@ -105,6 +116,9 @@ export class WalletService {
   private readonly sendTransfer: NonNullable<
     WalletServiceDependencies["sendTransfer"]
   >;
+  private readonly sendTokenTransfer: NonNullable<
+    WalletServiceDependencies["sendTokenTransfer"]
+  >;
   private readonly readTokenMetadata: NonNullable<
     WalletServiceDependencies["readTokenMetadata"]
   >;
@@ -118,6 +132,8 @@ export class WalletService {
   constructor(dependencies: WalletServiceDependencies = {}) {
     this.storage = dependencies.storage ?? storageService;
     this.sendTransfer = dependencies.sendTransfer ?? sendNativeTransfer;
+    this.sendTokenTransfer =
+      dependencies.sendTokenTransfer ?? sendErc20Transfer;
     this.readTokenMetadata = dependencies.readTokenMetadata ?? readTokenMetadata;
     this.readNftMetadata = dependencies.readNftMetadata ?? readNftMetadata;
     this.readNftOwnership = dependencies.readNftOwnership ?? readNftOwnership;
@@ -785,6 +801,50 @@ export class WalletService {
     return this.sendTransfer({
       to: tx.to,
       value: tx.value,
+      gas: tx.estimate?.gas,
+      gasPrice: tx.estimate?.gasPrice,
+      privateKey,
+    });
+  }
+
+  /**
+   * Signs and broadcasts an ERC-20 `transfer` for the selected account.
+   *
+   * Only tokens explicitly added to the selected account and still visible may
+   * be sent: a hidden token is treated as unavailable, even though it remains
+   * stored, so the send flow cannot target assets the user has hidden.
+   */
+  async signAndSendTokenTransfer(tx: {
+    from: Address;
+    token: Address;
+    to: Address;
+    amount: bigint;
+    estimate?: Erc20TransferEstimate;
+  }): Promise<Hash> {
+    const selectedAccount = this.state.accounts.find(
+      (account) => account.index === this.state.selectedAccountIndex,
+    );
+    if (!this.state.isUnlocked || !selectedAccount) {
+      throw new Error("Wallet is locked");
+    }
+    if (tx.from !== selectedAccount.address) {
+      throw new Error("Selected account changed. Review the transfer again.");
+    }
+    const token = selectedAccount.tokens.find(
+      (candidate) =>
+        candidate.address.toLowerCase() === tx.token.toLowerCase(),
+    );
+    if (!token || token.hidden) {
+      throw new Error("This token is not available in the selected account.");
+    }
+    const privateKey = this.privateKeys.get(selectedAccount.index);
+    if (!privateKey) {
+      throw new Error("Wallet is locked");
+    }
+    return this.sendTokenTransfer({
+      token: token.address,
+      to: tx.to,
+      amount: tx.amount,
       gas: tx.estimate?.gas,
       gasPrice: tx.estimate?.gasPrice,
       privateKey,

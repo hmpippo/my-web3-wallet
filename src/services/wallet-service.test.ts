@@ -363,6 +363,92 @@ describe("WalletService", () => {
     expect(sendTransfer).toHaveBeenCalledTimes(1);
   });
 
+  it("only signs and sends ERC-20 transfers for tokens added and visible in the account", async () => {
+    const sendTokenTransfer = vi.fn(async () => "0xabc" as `0x${string}`);
+    const readTokenMetadata = vi.fn(async (address: `0x${string}`) => ({
+      address,
+      name: "Test Token",
+      symbol: "TST",
+      decimals: 6,
+    }));
+    const service = new WalletService({
+      storage: createStorage().storage,
+      sendTokenTransfer,
+      readTokenMetadata,
+    });
+    const token = "0x0000000000000000000000000000000000000009" as `0x${string}`;
+    const transfer = {
+      from: EXPECTED_ADDRESS as `0x${string}`,
+      token,
+      to: "0x0000000000000000000000000000000000000001" as `0x${string}`,
+      amount: BigInt(1_000),
+    };
+    const estimate = {
+      gas: BigInt(60_000),
+      gasPrice: BigInt(10),
+      estimatedFee: BigInt(600_000),
+    };
+
+    await expect(service.signAndSendTokenTransfer(transfer)).rejects.toThrow(
+      "Wallet is locked",
+    );
+    expect(sendTokenTransfer).not.toHaveBeenCalled();
+
+    await service.importWallet(TEST_MNEMONIC, "correct horse");
+    await expect(service.signAndSendTokenTransfer(transfer)).rejects.toThrow(
+      "not available",
+    );
+    expect(sendTokenTransfer).not.toHaveBeenCalled();
+
+    await service.addToken(token);
+    await expect(
+      service.signAndSendTokenTransfer({ ...transfer, estimate }),
+    ).resolves.toBe("0xabc");
+    expect(sendTokenTransfer).toHaveBeenCalledWith({
+      token,
+      to: transfer.to,
+      amount: transfer.amount,
+      gas: estimate.gas,
+      gasPrice: estimate.gasPrice,
+      privateKey: expect.stringMatching(/^0x[0-9a-f]{64}$/),
+    });
+
+    await service.hideToken(token);
+    await expect(service.signAndSendTokenTransfer(transfer)).rejects.toThrow(
+      "not available",
+    );
+    expect(sendTokenTransfer).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects an ERC-20 transfer when the selected account changed", async () => {
+    const sendTokenTransfer = vi.fn(async () => "0xabc" as `0x${string}`);
+    const readTokenMetadata = vi.fn(async (address: `0x${string}`) => ({
+      address,
+      name: "Test Token",
+      symbol: "TST",
+      decimals: 6,
+    }));
+    const service = new WalletService({
+      storage: createStorage().storage,
+      sendTokenTransfer,
+      readTokenMetadata,
+    });
+    await service.importWallet(TEST_MNEMONIC, "correct horse");
+    const token = "0x0000000000000000000000000000000000000009" as `0x${string}`;
+    await service.addToken(token);
+    await service.addAccount();
+
+    await expect(
+      service.signAndSendTokenTransfer({
+        from: EXPECTED_ADDRESS as `0x${string}`,
+        token,
+        to: "0x0000000000000000000000000000000000000001" as `0x${string}`,
+        amount: BigInt(1),
+      }),
+    ).rejects.toThrow("Selected account changed");
+    expect(sendTokenTransfer).not.toHaveBeenCalled();
+  });
+
   it("renames, hides, restores, and keeps hidden derivation indexes reserved", async () => {
     const { storage, getAccountMetadata } = createStorage();
     const service = new WalletService({ storage });

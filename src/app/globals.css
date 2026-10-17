@@ -901,6 +901,12 @@ input {
   font-size: 0.72rem;
 }
 
+.token-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+}
+
 .token-management {
   margin-top: 1rem;
 }
@@ -1411,6 +1417,27 @@ input {
 }
 
 .send-fields input:disabled {
+  cursor: not-allowed;
+}
+
+.send-fields select {
+  width: 100%;
+  min-height: 3rem;
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+  background: #f8faf8;
+  padding: 0 0.9rem;
+  color: var(--foreground);
+  font: inherit;
+  font-size: 0.85rem;
+}
+
+.send-fields select:focus {
+  border-color: var(--accent);
+  outline: 3px solid rgb(20 107 75 / 12%);
+}
+
+.send-fields select:disabled {
   cursor: not-allowed;
 }
 

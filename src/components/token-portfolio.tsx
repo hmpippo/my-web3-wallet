@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   useCallback,
   useEffect,
@@ -229,14 +230,22 @@ export function TokenPortfolio({
                     </strong>
                   )}
                 </div>
-                <button
-                  aria-label={`Hide ${token.name}`}
-                  className="text-button"
-                  onClick={() => void changeVisibility(token, false)}
-                  type="button"
-                >
-                  Hide
-                </button>
+                <div className="token-actions">
+                  <Link
+                    className="text-link"
+                    href={`/send?token=${token.address}`}
+                  >
+                    Send
+                  </Link>
+                  <button
+                    aria-label={`Hide ${token.name}`}
+                    className="text-button"
+                    onClick={() => void changeVisibility(token, false)}
+                    type="button"
+                  >
+                    Hide
+                  </button>
+                </div>
               </li>
             );
           })}
