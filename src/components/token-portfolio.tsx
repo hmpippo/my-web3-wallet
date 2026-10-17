@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { formatEther, type Address } from "viem";
+import { formatUnits, type Address } from "viem";
+import { getWalletChain } from "@/core/chain";
 import type { StoredWalletToken } from "@/core/storage";
 import { getNativeBalance } from "@/services/balance-service";
 import { getTokenBalance } from "@/services/token-service";
@@ -13,6 +14,7 @@ const NATIVE_KEY = "native";
 
 interface TokenPortfolioProps {
   accountAddress: Address;
+  chainId: number;
   tokens: readonly StoredWalletToken[];
 }
 
@@ -24,8 +26,11 @@ interface TokenBalanceState {
 
 export function TokenPortfolio({
   accountAddress,
+  chainId,
   tokens,
 }: TokenPortfolioProps) {
+  const { chain } = getWalletChain(chainId);
+  const native = chain.nativeCurrency;
   const [balances, setBalances] = useState<Record<string, TokenBalanceState>>(
     {},
   );
@@ -38,10 +43,13 @@ export function TokenPortfolio({
   const refreshNativeBalance = useCallback(async () => {
     setBalances((current) => ({ ...current, [NATIVE_KEY]: { loading: true } }));
     try {
-      const raw = await getNativeBalance(accountAddress);
+      const raw = await getNativeBalance(accountAddress, chainId);
       setBalances((current) => ({
         ...current,
-        [NATIVE_KEY]: { loading: false, formatted: formatEther(raw) },
+        [NATIVE_KEY]: {
+          loading: false,
+          formatted: formatUnits(raw, native.decimals),
+        },
       }));
     } catch (caught) {
       setBalances((current) => ({
@@ -51,11 +59,11 @@ export function TokenPortfolio({
           error:
             caught instanceof Error
               ? caught.message
-              : "Could not load the ETH balance.",
+              : `Could not load the ${native.symbol} balance.`,
         },
       }));
     }
-  }, [accountAddress]);
+  }, [accountAddress, chainId, native.decimals, native.symbol]);
 
   const refreshBalance = useCallback(
     async (token: StoredWalletToken) => {
@@ -65,7 +73,7 @@ export function TokenPortfolio({
         [key]: { loading: true },
       }));
       try {
-        const result = await getTokenBalance(token, accountAddress);
+        const result = await getTokenBalance(token, accountAddress, chainId);
         setBalances((current) => ({
           ...current,
           [key]: { loading: false, formatted: result.formatted },
@@ -83,7 +91,7 @@ export function TokenPortfolio({
         }));
       }
     },
-    [accountAddress],
+    [accountAddress, chainId],
   );
 
   const refreshList = useCallback(() => {
@@ -97,12 +105,15 @@ export function TokenPortfolio({
     let cancelled = false;
     setBalances({});
     void Promise.all([
-      getNativeBalance(accountAddress)
+      getNativeBalance(accountAddress, chainId)
         .then((raw) => {
           if (!cancelled) {
             setBalances((current) => ({
               ...current,
-              [NATIVE_KEY]: { loading: false, formatted: formatEther(raw) },
+              [NATIVE_KEY]: {
+                loading: false,
+                formatted: formatUnits(raw, native.decimals),
+              },
             }));
           }
         })
@@ -115,14 +126,14 @@ export function TokenPortfolio({
                 error:
                   caught instanceof Error
                     ? caught.message
-                    : "Could not load the ETH balance.",
+                    : `Could not load the ${native.symbol} balance.`,
               },
             }));
           }
         }),
       ...visibleTokens.map(async (token) => {
         try {
-          const result = await getTokenBalance(token, accountAddress);
+          const result = await getTokenBalance(token, accountAddress, chainId);
           if (!cancelled) {
             setBalances((current) => ({
               ...current,
@@ -151,13 +162,13 @@ export function TokenPortfolio({
     return () => {
       cancelled = true;
     };
-  }, [accountAddress, visibleTokens]);
+  }, [accountAddress, chainId, visibleTokens, native.decimals, native.symbol]);
 
   return (
     <section className="history-card token-card" aria-labelledby="tokens-heading">
       <div className="history-heading">
         <div>
-          <p className="eyebrow">Sepolia assets</p>
+          <p className="eyebrow">{chain.name} assets</p>
           <h2 id="tokens-heading">Tokens</h2>
         </div>
         <OverflowMenu
@@ -172,8 +183,8 @@ export function TokenPortfolio({
       <ul className="token-list" aria-label="Tokens">
         <li className="token-item token-item-native">
           <div className="token-identity">
-            <strong>Ether</strong>
-            <span>ETH</span>
+            <strong>{native.name}</strong>
+            <span>{native.symbol}</span>
             <span className="token-badge">Native asset</span>
           </div>
           <div className="token-balance">
@@ -191,7 +202,9 @@ export function TokenPortfolio({
                 </button>
               </div>
             ) : (
-              <strong>{balances[NATIVE_KEY]?.formatted} ETH</strong>
+              <strong>
+                {balances[NATIVE_KEY]?.formatted} {native.symbol}
+              </strong>
             )}
           </div>
           <div className="token-actions">

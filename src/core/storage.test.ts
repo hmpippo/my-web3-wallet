@@ -29,6 +29,7 @@ const testAccountMetadata: WalletAccountMetadata = {
       hidden: false,
       tokens: [
         {
+          chainId: 11155111,
           address: "0x0000000000000000000000000000000000000001",
           name: "Test Token",
           symbol: "TST",
@@ -38,6 +39,7 @@ const testAccountMetadata: WalletAccountMetadata = {
       ],
       nfts: [
         {
+          chainId: 11155111,
           address: "0x0000000000000000000000000000000000000003",
           tokenId: "42",
           standard: "ERC-721",
@@ -263,6 +265,85 @@ describe("vault storage", () => {
     await expect(storageService.loadAccountMetadata()).resolves.toMatchObject({
       accounts: [{ tokens: [], nfts: [] }],
     });
+  });
+
+  it("keeps the same token and NFT address on different chains", async () => {
+    const localStorage = createLocalStorageMock();
+    vi.stubGlobal("window", { localStorage });
+    const first = testAccountMetadata.accounts[1]!;
+    const token = first.tokens![0]!;
+    const nft = first.nfts![0]!;
+
+    await storageService.saveAccountMetadata({
+      ...testAccountMetadata,
+      accounts: [
+        testAccountMetadata.accounts[0]!,
+        {
+          ...first,
+          tokens: [token, { ...token, chainId: 1 }],
+          nfts: [nft, { ...nft, chainId: 1 }],
+        },
+      ],
+    });
+
+    await expect(storageService.loadAccountMetadata()).resolves.toMatchObject({
+      accounts: [
+        { tokens: [], nfts: [] },
+        {
+          tokens: [{ chainId: 11155111 }, { chainId: 1 }],
+          nfts: [{ chainId: 11155111 }, { chainId: 1 }],
+        },
+      ],
+    });
+  });
+
+  it("defaults legacy assets without a chain to Sepolia", async () => {
+    const localStorage = createLocalStorageMock();
+    vi.stubGlobal("window", { localStorage });
+    localStorage.setItem(
+      ACCOUNT_METADATA_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        accounts: [
+          {
+            path: "m/44'/60'/0'/0/0",
+            name: "Account 1",
+            hidden: false,
+            tokens: [
+              {
+                address: "0x0000000000000000000000000000000000000001",
+                name: "Test Token",
+                symbol: "TST",
+                decimals: 6,
+                hidden: false,
+              },
+            ],
+            nfts: [],
+          },
+        ],
+        selectedPath: "m/44'/60'/0'/0/0",
+      }),
+    );
+
+    await expect(storageService.loadAccountMetadata()).resolves.toMatchObject({
+      accounts: [{ tokens: [{ chainId: 11155111 }] }],
+    });
+  });
+
+  it("rejects assets that reference an unsupported chain", async () => {
+    vi.stubGlobal("window", { localStorage: createLocalStorageMock() });
+    const first = testAccountMetadata.accounts[1]!;
+    const token = first.tokens![0]!;
+
+    await expect(
+      storageService.saveAccountMetadata({
+        ...testAccountMetadata,
+        accounts: [
+          testAccountMetadata.accounts[0]!,
+          { ...first, tokens: [{ ...token, chainId: 999999 }] },
+        ],
+      }),
+    ).rejects.toThrow("unsupported chain");
   });
 
   it("surfaces invalid stored JSON and invalid vault shapes", async () => {

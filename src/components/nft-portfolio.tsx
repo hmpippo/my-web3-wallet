@@ -2,16 +2,19 @@
 
 import Image from "next/image";
 import { useState } from "react";
+import { getWalletChain } from "@/core/chain";
 import type { StoredWalletNft } from "@/core/storage";
 import { walletService } from "@/services/wallet-service";
 import { CopyButton } from "@/components/copy-button";
 import { OverflowMenu } from "@/components/overflow-menu";
 
 interface NftPortfolioProps {
+  chainId: number;
   nfts: readonly StoredWalletNft[];
 }
 
-export function NftPortfolio({ nfts }: NftPortfolioProps) {
+export function NftPortfolio({ chainId, nfts }: NftPortfolioProps) {
+  const { chain } = getWalletChain(chainId);
   const [selectedNft, setSelectedNft] = useState<StoredWalletNft | null>(null);
   const [removingKey, setRemovingKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -32,6 +35,7 @@ export function NftPortfolio({ nfts }: NftPortfolioProps) {
         nft.address,
         nft.tokenId,
         nft.standard,
+        chainId,
       );
       if (selectedNft && nftKey(selectedNft) === key) setSelectedNft(null);
     } catch (caught) {
@@ -49,7 +53,7 @@ export function NftPortfolio({ nfts }: NftPortfolioProps) {
     <section className="history-card nft-card" aria-labelledby="nfts-heading">
       <div className="history-heading">
         <div>
-          <p className="eyebrow">Sepolia assets</p>
+          <p className="eyebrow">{chain.name} assets</p>
           <h2 id="nfts-heading">NFTs</h2>
         </div>
         <OverflowMenu
@@ -57,7 +61,7 @@ export function NftPortfolio({ nfts }: NftPortfolioProps) {
           items={[
             {
               label: "Refresh list",
-              onClick: () => void walletService.syncNftOwnership(),
+              onClick: () => void walletService.syncNftOwnership(chainId),
             },
             { label: "Import NFT", href: "/nfts/import" },
           ]}

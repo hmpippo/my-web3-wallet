@@ -11,28 +11,28 @@ import {
   type FormEvent,
 } from "react";
 import {
-  formatEther,
   formatUnits,
   getAddress,
   isAddress,
-  parseEther,
   parseUnits,
   type Address,
   type Hash,
 } from "viem";
-import { CHAIN } from "@/core/chain";
+import { getExplorerTxUrl } from "@/core/chain";
 import type { StoredWalletToken } from "@/core/storage";
+import { useActiveChain } from "@/lib/use-active-chain";
 import { CopyButton } from "@/components/copy-button";
 import {
   estimateErc20Transfer,
   estimateNativeTransfer,
   type NativeTransferEstimate,
 } from "@/services/transaction-service";
-import { walletService } from "@/services/wallet-service";
+import { selectAccountTokens, walletService } from "@/services/wallet-service";
 
 const NATIVE_ASSET = "native";
 
 interface TransferReview {
+  chainId: number;
   from: Address;
   to: Address;
   value: bigint;
@@ -41,6 +41,8 @@ interface TransferReview {
 }
 
 export function SendForm() {
+  const { chainId, chain, isTestnet } = useActiveChain();
+  const native = chain.nativeCurrency;
   const walletState = useSyncExternalStore(
     walletService.subscribe,
     () => walletService.getState(),
@@ -51,8 +53,10 @@ export function SendForm() {
     (account) => account.index === walletState.selectedAccountIndex,
   );
   const visibleTokens = useMemo(
-    () => (selectedAccount?.tokens ?? []).filter((token) => !token.hidden),
-    [selectedAccount],
+    () =>
+      (selectedAccount ? selectAccountTokens(selectedAccount, chainId) : [])
+        .filter((token) => !token.hidden),
+    [selectedAccount, chainId],
   );
   const searchParams = useSearchParams();
   const requestedToken = searchParams.get("token");
@@ -64,9 +68,13 @@ export function SendForm() {
   const [to, setTo] = useState("");
   const [amount, setAmount] = useState("");
   const [review, setReview] = useState<TransferReview | null>(null);
-  const [transactionHash, setTransactionHash] = useState<Hash | null>(null);
+  const [submission, setSubmission] = useState<{
+    hash: Hash;
+    chainId: number;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
+  const [renderedChainId, setRenderedChainId] = useState(chainId);
 
   const requestedTokenMatch = requestedToken
     ? visibleTokens.find(
@@ -74,13 +82,28 @@ export function SendForm() {
           token.address.toLowerCase() === requestedToken.toLowerCase(),
       )
     : undefined;
-  const effectiveAssetId = assetId ?? requestedTokenMatch?.address ?? NATIVE_ASSET;
+  const preferredAssetId =
+    assetId ?? requestedTokenMatch?.address ?? NATIVE_ASSET;
   const selectedToken =
-    effectiveAssetId === NATIVE_ASSET
+    preferredAssetId === NATIVE_ASSET
       ? null
-      : visibleTokens.find((token) => token.address === effectiveAssetId) ??
+      : visibleTokens.find((token) => token.address === preferredAssetId) ??
         null;
-  const assetSymbol = selectedToken ? selectedToken.symbol : "ETH";
+  // The select must always point at an asset that exists on the active chain,
+  // so an asset chosen on a previous network falls back to the native coin.
+  const assetValue = selectedToken ? selectedToken.address : NATIVE_ASSET;
+  const assetSymbol = selectedToken ? selectedToken.symbol : native.symbol;
+
+  // The active chain changed: a pending review, submission, or error from the
+  // previous network no longer applies. Adjusting state during render (rather
+  // than in an effect) avoids rendering once with stale values.
+  if (renderedChainId !== chainId) {
+    setRenderedChainId(chainId);
+    setReview(null);
+    setSubmission(null);
+    setError(null);
+    setIsBusy(false);
+  }
 
   useEffect(
     () => () => {
@@ -93,7 +116,7 @@ export function SendForm() {
     event.preventDefault();
     setError(null);
     setReview(null);
-    setTransactionHash(null);
+    setSubmission(null);
     setIsBusy(true);
     const requestId = ++reviewRequestId.current;
 
@@ -107,24 +130,33 @@ export function SendForm() {
       const recipient = getAddress(to);
       const value = selectedToken
         ? parseUnits(amount, selectedToken.decimals)
-        : parseEther(amount);
+        : parseUnits(amount, native.decimals);
       const estimate = selectedToken
         ? await estimateErc20Transfer({
             from,
             token: selectedToken.address,
             to: recipient,
             amount: value,
+            chainId,
           })
         : await estimateNativeTransfer({
             from,
             to: recipient,
             value,
+            chainId,
           });
       if (requestId !== reviewRequestId.current) return;
       if (!walletService.isUnlocked || walletService.getAddress() !== from) {
         throw new Error("Selected account changed while preparing the transfer.");
       }
-      setReview({ from, to: recipient, value, estimate, token: selectedToken });
+      setReview({
+        chainId,
+        from,
+        to: recipient,
+        value,
+        estimate,
+        token: selectedToken,
+      });
     } catch (caught) {
       if (requestId === reviewRequestId.current) {
         setError(
@@ -155,15 +187,17 @@ export function SendForm() {
             token: review.token.address,
             to: review.to,
             amount: review.value,
+            chainId: review.chainId,
             estimate: review.estimate,
           })
         : await walletService.signAndSendTransaction({
             from: review.from,
             to: review.to,
             value: review.value,
+            chainId: review.chainId,
             estimate: review.estimate,
           });
-      setTransactionHash(hash);
+      setSubmission({ hash, chainId: review.chainId });
       setReview(null);
       setAmount("");
       setTo("");
@@ -179,14 +213,21 @@ export function SendForm() {
     }
   }
 
+  const explorerTxUrl = submission
+    ? getExplorerTxUrl(submission.chainId, submission.hash)
+    : null;
+
   return (
     <main className="page-main">
       <section className="page-heading">
-        <p className="eyebrow">Sepolia testnet</p>
+        <p className="eyebrow">
+          {chain.name} {isTestnet ? "testnet" : "mainnet"}
+        </p>
         <h1>Send</h1>
         <p>
-          Send ETH or any ERC-20 token you have added to this account. Check the
-          recipient and estimated network fee before confirming.
+          Send {native.symbol} or any ERC-20 token you have added to this account
+          on {chain.name}. Check the recipient and estimated network fee before
+          confirming.
         </p>
       </section>
 
@@ -209,9 +250,9 @@ export function SendForm() {
                 setReview(null);
                 setIsBusy(false);
               }}
-              value={effectiveAssetId}
+              value={assetValue}
             >
-              <option value={NATIVE_ASSET}>ETH (native)</option>
+              <option value={NATIVE_ASSET}>{native.symbol} (native)</option>
               {visibleTokens.map((token) => (
                 <option key={token.address} value={token.address}>
                   {token.symbol} — {token.name}
@@ -292,7 +333,7 @@ export function SendForm() {
                 <dd>
                   {review.token
                     ? `${formatUnits(review.value, review.token.decimals)} ${review.token.symbol}`
-                    : `${formatEther(review.value)} ETH`}
+                    : `${formatUnits(review.value, native.decimals)} ${native.symbol}`}
                 </dd>
               </div>
               {review.token ? (
@@ -309,13 +350,20 @@ export function SendForm() {
               ) : null}
               <div>
                 <dt>Estimated network fee</dt>
-                <dd>{formatEther(review.estimate.estimatedFee)} ETH</dd>
+                <dd>
+                  {formatUnits(review.estimate.estimatedFee, native.decimals)}{" "}
+                  {native.symbol}
+                </dd>
               </div>
               {!review.token ? (
                 <div>
                   <dt>Estimated total</dt>
                   <dd>
-                    {formatEther(review.value + review.estimate.estimatedFee)} ETH
+                    {formatUnits(
+                      review.value + review.estimate.estimatedFee,
+                      native.decimals,
+                    )}{" "}
+                    {native.symbol}
                   </dd>
                 </div>
               ) : null}
@@ -346,16 +394,16 @@ export function SendForm() {
             {error}
           </p>
         )}
-        {transactionHash && (
+        {submission && (
           <p className="success-message" role="status">
             Transaction submitted:{" "}
-            <a
-              href={`${CHAIN.blockExplorers.default.url}/tx/${transactionHash}`}
-              rel="noreferrer"
-              target="_blank"
-            >
-              {transactionHash}
-            </a>
+            {explorerTxUrl ? (
+              <a href={explorerTxUrl} rel="noreferrer" target="_blank">
+                {submission.hash}
+              </a>
+            ) : (
+              submission.hash
+            )}
           </p>
         )}
         <Link className="text-link back-link" href="/wallet">

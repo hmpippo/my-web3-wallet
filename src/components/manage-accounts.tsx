@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState, useSyncExternalStore, type FormEvent } from "react";
+import { useActiveChain } from "@/lib/use-active-chain";
 import { walletService } from "@/services/wallet-service";
 import { CopyButton } from "@/components/copy-button";
 import { OverflowMenu } from "@/components/overflow-menu";
@@ -11,6 +12,7 @@ import { OverflowMenu } from "@/components/overflow-menu";
  * account overflow menu. Adding an account lives here too.
  */
 export function ManageAccounts() {
+  const { chain } = useActiveChain();
   const walletState = useSyncExternalStore(
     walletService.subscribe,
     () => walletService.getState(),
@@ -80,7 +82,7 @@ export function ManageAccounts() {
     <main className="page-main">
       <section className="page-heading dashboard-heading">
         <div>
-          <p className="eyebrow">Sepolia wallet</p>
+          <p className="eyebrow">{chain.name} wallet</p>
           <h1>Manage accounts</h1>
         </div>
         <Link className="button button-outline" href="/wallet">

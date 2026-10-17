@@ -25,4 +25,6 @@ export interface TransactionHistoryItem {
 export interface TransactionHistoryPage {
   items: TransactionHistoryItem[];
   nextCursor: string | null;
+  /** True when the active chain has no activity feed on the current plan. */
+  unavailable?: boolean;
 }

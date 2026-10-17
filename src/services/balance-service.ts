@@ -1,6 +1,9 @@
 import type { Address } from "viem";
-import { publicClient } from "@/core/chain";
+import { getPublicClient } from "@/core/chain";
 
-export async function getNativeBalance(address: Address): Promise<bigint> {
-  return publicClient.getBalance({ address });
+export async function getNativeBalance(
+  address: Address,
+  chainId: number,
+): Promise<bigint> {
+  return getPublicClient(chainId).getBalance({ address });
 }

@@ -1720,3 +1720,88 @@ input {
     text-align: left;
   }
 }
+
+/* --- Multi-chain network switcher --- */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.chain-switcher {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.header-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 1.25rem;
+}
+
+.chain-switcher-label {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.chain-switcher-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.55rem;
+  border: 1px solid rgb(23 34 29 / 12%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 60%);
+}
+
+.chain-switcher-select {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.chain-switcher-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 0.4rem;
+}
+
+.status-dot-mainnet {
+  background: #39946c;
+}
+
+.mainnet-warning {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 1.25rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: 0.75rem;
+  background: #fdf3e3;
+  color: #8a5a12;
+  font-size: 0.8rem;
+}
+
+.mainnet-warning .status-dot {
+  background: #d39c43;
+}
+
+@media (max-width: 640px) {
+  .chain-switcher-label {
+    display: none;
+  }
+}
+

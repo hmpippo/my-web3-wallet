@@ -1,6 +1,6 @@
 import type { Address } from "viem";
 import { getAddress } from "viem";
-import { publicClient } from "@/core/chain";
+import { getPublicClient } from "@/core/chain";
 import type { NftStandard, StoredWalletNft } from "@/core/storage";
 import {
   isJsonMediaType,
@@ -71,14 +71,17 @@ export interface NftServiceDependencies {
 
 function resolveReadContract(
   dependencies: NftServiceDependencies,
+  chainId: number,
 ): NonNullable<NftServiceDependencies["readContract"]> {
   return (
     dependencies.readContract ??
-    ((params) => publicClient.readContract(params as never) as Promise<unknown>)
+    ((params) =>
+      getPublicClient(chainId).readContract(params as never) as Promise<unknown>)
   );
 }
 
 export interface NftIdentity {
+  chainId: number;
   address: Address;
   tokenId: string;
   standard: NftStandard;
@@ -187,9 +190,10 @@ export async function readNftMetadata(
   address: Address,
   tokenId: bigint,
   standard: NftStandard,
+  chainId: number,
   dependencies: NftServiceDependencies = {},
 ): Promise<StoredWalletNft> {
-  const readContract = resolveReadContract(dependencies);
+  const readContract = resolveReadContract(dependencies, chainId);
   const requestFetch = dependencies.fetch ?? globalThis.fetch;
   try {
     const uriResult =
@@ -222,6 +226,7 @@ export async function readNftMetadata(
     return parseNftMetadata(
       metadata,
       {
+        chainId,
         address,
         tokenId: tokenId.toString(),
         standard,
@@ -261,9 +266,10 @@ export async function readNftOwnership(
   tokenId: bigint,
   standard: NftStandard,
   owner: Address,
+  chainId: number,
   dependencies: NftServiceDependencies = {},
 ): Promise<boolean> {
-  const readContract = resolveReadContract(dependencies);
+  const readContract = resolveReadContract(dependencies, chainId);
   if (standard === "ERC-721") {
     const tokenOwner = await readContract({
       address,

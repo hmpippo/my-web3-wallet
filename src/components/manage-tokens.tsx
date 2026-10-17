@@ -3,15 +3,21 @@
 import Link from "next/link";
 import { useState, useSyncExternalStore } from "react";
 import type { Address } from "viem";
-import { walletService } from "@/services/wallet-service";
+import { useActiveChain } from "@/lib/use-active-chain";
+import {
+  selectAccountTokens,
+  walletService,
+} from "@/services/wallet-service";
 import { CopyButton } from "@/components/copy-button";
 import { ToggleSwitch } from "@/components/toggle-switch";
 
 /**
- * Full token list for the selected account with a visibility switch per token.
- * The native asset is always visible, so its switch is on and disabled.
+ * Full token list for the selected account and chain with a visibility switch
+ * per token. The native asset is always visible, so its switch is on and
+ * disabled.
  */
 export function ManageTokens() {
+  const { chainId, chain } = useActiveChain();
   const walletState = useSyncExternalStore(
     walletService.subscribe,
     () => walletService.getState(),
@@ -20,7 +26,10 @@ export function ManageTokens() {
   const selectedAccount = walletState.accounts.find(
     (account) => account.index === walletState.selectedAccountIndex,
   );
-  const tokens = selectedAccount?.tokens ?? [];
+  const tokens = selectedAccount
+    ? selectAccountTokens(selectedAccount, chainId)
+    : [];
+  const native = chain.nativeCurrency;
   const [error, setError] = useState<string | null>(null);
   const [pendingAddress, setPendingAddress] = useState<string | null>(null);
 
@@ -29,9 +38,9 @@ export function ManageTokens() {
     setPendingAddress(address.toLowerCase());
     try {
       if (hidden) {
-        await walletService.hideToken(address);
+        await walletService.hideToken(address, chainId);
       } else {
-        await walletService.restoreToken(address);
+        await walletService.restoreToken(address, chainId);
       }
     } catch (caught) {
       setError(
@@ -48,7 +57,7 @@ export function ManageTokens() {
     <main className="page-main">
       <section className="page-heading dashboard-heading">
         <div>
-          <p className="eyebrow">Sepolia assets</p>
+          <p className="eyebrow">{chain.name} assets</p>
           <h1>Manage tokens</h1>
         </div>
         <Link className="button button-outline" href="/wallet">
@@ -73,15 +82,15 @@ export function ManageTokens() {
         <ul className="token-list" aria-label="Token visibility">
           <li className="token-item token-item-manage token-item-native">
             <div className="token-identity">
-              <strong>Ether</strong>
-              <span>ETH</span>
+              <strong>{native.name}</strong>
+              <span>{native.symbol}</span>
               <span className="token-badge">Native asset</span>
             </div>
             <div className="token-actions">
               <ToggleSwitch
                 checked
                 disabled
-                label="Ether is always visible"
+                label={`${native.symbol} is always visible`}
                 onChange={() => {}}
               />
             </div>

@@ -6,7 +6,12 @@ const { getBlockNumber } = vi.hoisted(() => ({
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/core/chain", () => ({
-  publicClient: { getBlockNumber },
+  getPublicClient: () => ({ getBlockNumber }),
+  getChain: (chainId: number) => ({
+    id: chainId,
+    name: chainId === 11155111 ? "Sepolia" : `Chain ${chainId}`,
+  }),
+  supportsHistory: (chainId: number) => chainId !== 8453,
 }));
 
 import {
@@ -19,8 +24,19 @@ const SENDER = "0x0000000000000000000000000000000000000002";
 const RECIPIENT = "0x0000000000000000000000000000000000000003";
 const TOKEN = "0x0000000000000000000000000000000000000004";
 const API_KEY = "test-only-etherscan-key";
+const SEPOLIA = 11155111;
 
 type Kind = "normal" | "internal" | "erc20";
+
+/** Calls the service on Sepolia unless a chain override is supplied. */
+function history(
+  address: string,
+  cursor: string | null = null,
+  kind: Kind | "all" = "all",
+  chainId: number = SEPOLIA,
+) {
+  return getEtherscanHistory(address as `0x${string}`, cursor, kind, chainId);
+}
 
 function record(kind: Kind, timestamp: number, index: number) {
   const common = {
@@ -106,7 +122,7 @@ describe("Etherscan history service", () => {
   });
 
   it("uses the fixed Sepolia V2 endpoints and normalizes all activity kinds", async () => {
-    const result = await getEtherscanHistory(ADDRESS);
+    const result = await history(ADDRESS);
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
     const requestedUrls = fetchMock.mock.calls.map(([input]) => new URL(String(input)));
@@ -148,8 +164,8 @@ describe("Etherscan history service", () => {
 
   it("coalesces concurrent requests for the same wallet page", async () => {
     const [first, second] = await Promise.all([
-      getEtherscanHistory(ADDRESS),
-      getEtherscanHistory(ADDRESS),
+          history(ADDRESS),
+          history(ADDRESS),
     ]);
 
     expect(first).toEqual(second);
@@ -157,7 +173,7 @@ describe("Etherscan history service", () => {
   });
 
   it("fetches only the selected activity source for a tab", async () => {
-    const result = await getEtherscanHistory(ADDRESS, null, "erc20");
+    const result = await history(ADDRESS, null, "erc20");
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(new URL(String(fetchMock.mock.calls[0][0])).searchParams.get("action")).toBe("tokentx");
@@ -171,7 +187,7 @@ describe("Etherscan history service", () => {
     let loaded = 0;
 
     do {
-      const page = await getEtherscanHistory(ADDRESS, cursor);
+      const page = await history(ADDRESS, cursor);
       for (const item of page.items) {
         expect(seenIds.has(item.id)).toBe(false);
         seenIds.add(item.id);
@@ -193,7 +209,7 @@ describe("Etherscan history service", () => {
 
   it("distinguishes a valid empty result from an API error", async () => {
     records = { normal: [], internal: [], erc20: [] };
-    await expect(getEtherscanHistory(ADDRESS)).resolves.toEqual({
+    await expect(history(ADDRESS)).resolves.toEqual({
       items: [],
       nextCursor: null,
     });
@@ -205,7 +221,7 @@ describe("Etherscan history service", () => {
       }
       return makeResponse("0", "No transactions found", "No transactions found");
     });
-    await expect(getEtherscanHistory(ADDRESS)).rejects.toMatchObject({
+    await expect(history(ADDRESS)).rejects.toMatchObject({
       code: "provider",
     });
   });
@@ -214,32 +230,39 @@ describe("Etherscan history service", () => {
     fetchMock.mockImplementation(async () =>
       makeResponse("0", "Max rate limit reached", "NOTOK"),
     );
-    await expect(getEtherscanHistory(ADDRESS)).rejects.toMatchObject({
+    await expect(history(ADDRESS)).rejects.toMatchObject({
       code: "rate-limit",
     });
   });
 
   it("rejects a modified or wrong-address cursor", async () => {
-    const firstPage = await getEtherscanHistory(ADDRESS);
+    const firstPage = await history(ADDRESS);
     const cursor = firstPage.nextCursor!;
     const signatureStart = cursor.lastIndexOf(".") + 1;
     const tamperedCursor = `${cursor.slice(0, signatureStart)}${cursor[signatureStart] === "A" ? "B" : "A"}${cursor.slice(signatureStart + 1)}`;
 
     await expect(
-      getEtherscanHistory(ADDRESS, tamperedCursor),
+      history(ADDRESS, tamperedCursor),
     ).rejects.toBeInstanceOf(HistoryServiceError);
     await expect(
-      getEtherscanHistory(RECIPIENT, cursor),
+      history(RECIPIENT, cursor),
     ).rejects.toMatchObject({ code: "cursor" });
     await expect(
-      getEtherscanHistory(ADDRESS, cursor, "internal"),
+      history(ADDRESS, cursor, "internal"),
     ).rejects.toMatchObject({ code: "cursor" });
   });
 
   it("requires a server-side Etherscan API key", async () => {
     delete process.env.ETHERSCAN_API_KEY;
-    await expect(getEtherscanHistory(ADDRESS)).rejects.toMatchObject({
+    await expect(history(ADDRESS)).rejects.toMatchObject({
       code: "missing-key",
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("reports chains without free-tier history without contacting the provider", async () => {
+    await expect(history(ADDRESS, null, "all", 8453)).rejects.toMatchObject({
+      code: "unsupported",
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });

@@ -2,9 +2,14 @@
 
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { truncateAddress } from "@/lib/address";
-import { walletService } from "@/services/wallet-service";
+import { useActiveChain } from "@/lib/use-active-chain";
+import {
+  selectAccountNfts,
+  selectAccountTokens,
+  walletService,
+} from "@/services/wallet-service";
 import { CopyButton } from "@/components/copy-button";
 import { TransactionHistory } from "@/components/transaction-history";
 import { TokenPortfolio } from "@/components/token-portfolio";
@@ -13,6 +18,7 @@ import { NftPortfolio } from "@/components/nft-portfolio";
 export function WalletDashboard() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { chainId, chain, isTestnet } = useActiveChain();
   const walletState = useSyncExternalStore(
     walletService.subscribe,
     () => walletService.getState(),
@@ -34,13 +40,21 @@ export function WalletDashboard() {
   const selectedAccount = walletState.accounts.find(
     (account) => account.index === walletState.selectedAccountIndex,
   );
+  const chainTokens = useMemo(
+    () => (selectedAccount ? selectAccountTokens(selectedAccount, chainId) : []),
+    [selectedAccount, chainId],
+  );
+  const chainNfts = useMemo(
+    () => (selectedAccount ? selectAccountNfts(selectedAccount, chainId) : []),
+    [selectedAccount, chainId],
+  );
 
-  // Opening the NFT list (or switching account) re-checks ownership on chain so
-  // a token transferred away in the meantime disappears from the account.
+  // Opening the NFT list (or switching account/chain) re-checks ownership on
+  // chain so a token transferred away in the meantime disappears.
   useEffect(() => {
     if (activePortfolioTab !== "nfts" || !address) return;
-    void walletService.syncNftOwnership();
-  }, [activePortfolioTab, address]);
+    void walletService.syncNftOwnership(chainId);
+  }, [activePortfolioTab, address, chainId]);
 
   async function handleAccountChange(index: number) {
     try {
@@ -62,7 +76,7 @@ export function WalletDashboard() {
     <main className="page-main">
       <section className="page-heading dashboard-heading">
         <div>
-          <p className="eyebrow">Sepolia wallet</p>
+          <p className="eyebrow">{chain.name} wallet</p>
           <h1>Your wallet</h1>
         </div>
         <button className="button button-outline" onClick={lockWallet} type="button">
@@ -70,12 +84,19 @@ export function WalletDashboard() {
         </button>
       </section>
 
+      {isTestnet ? null : (
+        <p className="mainnet-warning" role="status">
+          <span className="status-dot" aria-hidden="true" />
+          You are on {chain.name} mainnet. Balances and transfers use real funds.
+        </p>
+      )}
+
       <section className="preview-card balance-card" aria-labelledby="account-heading">
         <div className="balance-topline">
           <h2 id="account-heading">Account</h2>
           <span className="network-label">
             <span className="status-dot" aria-hidden="true" />
-            Sepolia testnet
+            {chain.name} {isTestnet ? "testnet" : "mainnet"}
           </span>
         </div>
         <div className="account-controls">
@@ -169,8 +190,9 @@ export function WalletDashboard() {
         >
           <TokenPortfolio
             accountAddress={address}
-            key={selectedAccount.path}
-            tokens={selectedAccount.tokens}
+            chainId={chainId}
+            key={`${selectedAccount.path}:${chainId}`}
+            tokens={chainTokens}
           />
         </div>
       ) : null}
@@ -181,8 +203,9 @@ export function WalletDashboard() {
           role="tabpanel"
         >
           <NftPortfolio
-            key={selectedAccount.path}
-            nfts={selectedAccount.nfts}
+            chainId={chainId}
+            key={`${selectedAccount.path}:${chainId}`}
+            nfts={chainNfts}
           />
         </div>
       ) : null}
@@ -192,7 +215,11 @@ export function WalletDashboard() {
           id="portfolio-activity"
           role="tabpanel"
         >
-          <TransactionHistory key={address} address={address} />
+          <TransactionHistory
+            address={address}
+            chainId={chainId}
+            key={`${address}:${chainId}`}
+          />
         </div>
       ) : null}
     </main>

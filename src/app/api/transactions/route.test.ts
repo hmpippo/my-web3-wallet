@@ -6,7 +6,15 @@ const { getBlockNumber } = vi.hoisted(() => ({
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/core/chain", () => ({
-  publicClient: { getBlockNumber },
+  getPublicClient: () => ({ getBlockNumber }),
+  getChain: (chainId: number) => ({
+    id: chainId,
+    name: chainId === 11155111 ? "Sepolia" : `Chain ${chainId}`,
+  }),
+  isSupportedChainId: (value: unknown) =>
+    typeof value === "number" &&
+    [1, 8453, 42161, 10, 137, 11155111, 84532].includes(value),
+  supportsHistory: (chainId: number) => chainId !== 8453 && chainId !== 10,
 }));
 
 import { POST } from "./route";
@@ -54,9 +62,27 @@ describe("transaction history route", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("rejects unsupported chain ids", async () => {
+    const response = await POST(makeRequest({ address: ADDRESS, chainid: 999999 }));
+    expect(response.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("returns a graceful unavailable payload for chains without free-tier history", async () => {
+    const response = await POST(makeRequest({ address: ADDRESS, chainid: 8453 }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      items: [],
+      nextCursor: null,
+      unavailable: true,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("passes only the validated address and opaque cursor to the service", async () => {
     const response = await POST(
-      makeRequest({ address: ADDRESS, cursor: null }),
+      makeRequest({ address: ADDRESS, cursor: null, chainid: 11155111 }),
     );
 
     expect(response.status).toBe(200);
@@ -66,7 +92,7 @@ describe("transaction history route", () => {
   });
 
   it("accepts a selected history kind and fetches only that source", async () => {
-    const response = await POST(makeRequest({ address: ADDRESS, kind: "internal" }));
+    const response = await POST(makeRequest({ address: ADDRESS, kind: "internal", chainid: 11155111 }));
 
     expect(response.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -75,7 +101,7 @@ describe("transaction history route", () => {
   });
 
   it("rejects unknown history kinds", async () => {
-    const response = await POST(makeRequest({ address: ADDRESS, kind: "nft" }));
+    const response = await POST(makeRequest({ address: ADDRESS, kind: "nft", chainid: 11155111 }));
 
     expect(response.status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -93,7 +119,7 @@ describe("transaction history route", () => {
           });
     });
 
-    const response = await POST(makeRequest({ address: ADDRESS }));
+    const response = await POST(makeRequest({ address: ADDRESS, chainid: 11155111 }));
     const body = await response.text();
 
     expect(response.status).toBe(502);
@@ -111,7 +137,7 @@ describe("transaction history route", () => {
       }),
     );
 
-    const response = await POST(makeRequest({ address: ADDRESS }));
+    const response = await POST(makeRequest({ address: ADDRESS, chainid: 11155111 }));
     expect(response.status).toBe(429);
     expect(await response.json()).toEqual({
       error: "The history provider is busy. Try again shortly.",
@@ -121,7 +147,7 @@ describe("transaction history route", () => {
   it("reports missing server configuration without contacting Etherscan", async () => {
     delete process.env.ETHERSCAN_API_KEY;
 
-    const response = await POST(makeRequest({ address: ADDRESS }));
+    const response = await POST(makeRequest({ address: ADDRESS, chainid: 11155111 }));
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({
       error: "Transaction history is not configured on this server.",

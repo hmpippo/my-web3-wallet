@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { formatUnits, type Address } from "viem";
+import { getExplorerTxUrl, getWalletChain } from "@/core/chain";
 import { getTransactionHistory } from "@/services/transaction-history";
 import type {
   TransactionHistoryItem,
@@ -17,6 +18,7 @@ const HISTORY_TABS: { kind: TransactionHistoryKind; label: string }[] = [
 
 interface TransactionHistoryProps {
   address: Address;
+  chainId: number;
 }
 
 function describeActivity(item: TransactionHistoryItem, address: Address): string {
@@ -30,24 +32,27 @@ function describeActivity(item: TransactionHistoryItem, address: Address): strin
     item.kind === "erc20"
       ? `ERC-20 ${item.token?.symbol ?? "token"} transfer`
       : item.kind === "internal"
-        ? "Internal ETH transfer"
-        : "ETH transfer";
+        ? "Internal transfer"
+        : "Native transfer";
   return `${kind} · ${direction}`;
 }
 
-function formatAmount(item: TransactionHistoryItem): string {
-  return formatUnits(BigInt(item.value), item.token?.decimals ?? 18);
+function formatAmount(item: TransactionHistoryItem, nativeDecimals: number): string {
+  return formatUnits(BigInt(item.value), item.token?.decimals ?? nativeDecimals);
 }
 
 function formatTimestamp(timestamp: number): string {
   return new Date(timestamp * 1000).toLocaleString();
 }
 
-export function TransactionHistory({ address }: TransactionHistoryProps) {
+export function TransactionHistory({ address, chainId }: TransactionHistoryProps) {
+  const { chain } = getWalletChain(chainId);
+  const native = chain.nativeCurrency;
   const [items, setItems] = useState<TransactionHistoryItem[]>([]);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [unavailable, setUnavailable] = useState(false);
   const [selectedKind, setSelectedKind] = useState<TransactionHistoryKind>("normal");
   const [initialRetry, setInitialRetry] = useState(0);
   const isLoadingPage = useRef(false);
@@ -57,11 +62,12 @@ export function TransactionHistory({ address }: TransactionHistoryProps) {
     let active = true;
     const requestId = ++requestSequence.current;
     isLoadingPage.current = false;
-    getTransactionHistory(address, null, selectedKind)
+    getTransactionHistory(address, null, selectedKind, chainId)
       .then((page: TransactionHistoryPage) => {
         if (!active || requestSequence.current !== requestId) return;
         setItems(page.items);
         setNextCursor(page.nextCursor);
+        setUnavailable(page.unavailable === true);
       })
       .catch((cause: unknown) => {
         if (!active || requestSequence.current !== requestId) return;
@@ -77,7 +83,7 @@ export function TransactionHistory({ address }: TransactionHistoryProps) {
     return () => {
       active = false;
     };
-  }, [address, initialRetry, selectedKind]);
+  }, [address, chainId, initialRetry, selectedKind]);
 
   async function loadNextPage(cursor: string) {
     if (isLoadingPage.current) return;
@@ -86,7 +92,7 @@ export function TransactionHistory({ address }: TransactionHistoryProps) {
     setIsLoading(true);
     setError(null);
     try {
-      const page = await getTransactionHistory(address, cursor, selectedKind);
+      const page = await getTransactionHistory(address, cursor, selectedKind, chainId);
       if (requestSequence.current !== requestId) return;
       setItems((current) => [...current, ...page.items]);
       setNextCursor(page.nextCursor);
@@ -122,6 +128,7 @@ export function TransactionHistory({ address }: TransactionHistoryProps) {
     setItems([]);
     setNextCursor(null);
     setError(null);
+    setUnavailable(false);
     setIsLoading(true);
     setSelectedKind(kind);
   }
@@ -163,117 +170,129 @@ export function TransactionHistory({ address }: TransactionHistoryProps) {
     >
       <div className="history-heading">
         <div>
-          <p className="eyebrow">Sepolia activity</p>
+          <p className="eyebrow">{chain.name} activity</p>
           <h2 id="history-heading">Transaction history</h2>
         </div>
       </div>
 
-      <div className="history-tabs" role="tablist" aria-label="Transaction types">
-        {HISTORY_TABS.map((tab, index) => (
-          <button
-            key={tab.kind}
-            id={`history-tab-${tab.kind}`}
-            className="history-tab"
-            type="button"
-            role="tab"
-            aria-selected={selectedKind === tab.kind}
-            aria-controls="history-tabpanel"
-            tabIndex={selectedKind === tab.kind ? 0 : -1}
-            onClick={() => selectTab(tab.kind)}
-            onKeyDown={(event) => handleTabKeyDown(event, index)}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      <div
-        id="history-tabpanel"
-        className="history-tabpanel"
-        role="tabpanel"
-        aria-labelledby={selectedTabId}
-        aria-busy={isLoading}
-        tabIndex={0}
-      >
-        {isLoading && items.length === 0 ? (
-          <p className="history-message" role="status">
-            Loading {HISTORY_TABS.find((tab) => tab.kind === selectedKind)?.label.toLowerCase()}...
-          </p>
-        ) : null}
-
-        {error ? (
-          <div className="history-error" role="alert">
-            <p>{error}</p>
+      {unavailable ? (
+        <p className="history-message">
+          Activity is not available for {chain.name} yet. Balances and tokens
+          still load on this network.
+        </p>
+      ) : (
+        <>
+          <div className="history-tabs" role="tablist" aria-label="Transaction types">
+            {HISTORY_TABS.map((tab, index) => (
+              <button
+                key={tab.kind}
+                id={`history-tab-${tab.kind}`}
+                className="history-tab"
+                type="button"
+                role="tab"
+                aria-selected={selectedKind === tab.kind}
+                aria-controls="history-tabpanel"
+                tabIndex={selectedKind === tab.kind ? 0 : -1}
+                onClick={() => selectTab(tab.kind)}
+                onKeyDown={(event) => handleTabKeyDown(event, index)}
+              >
+                {tab.label}
+              </button>
+            ))}
           </div>
-        ) : null}
 
-        {!isLoading && !error && items.length === 0 ? (
-          <p className="history-message">
-            No {HISTORY_TABS.find((tab) => tab.kind === selectedKind)?.label.toLowerCase()} found for
-            this address.
-          </p>
-        ) : null}
-
-        {items.length > 0 ? (
-          <ol className="history-list">
-            {items.map((item) => {
-              const symbol = item.token?.symbol ?? "ETH";
-              const counterparty =
-                item.from.toLowerCase() === address.toLowerCase()
-                  ? item.to
-                  : item.from;
-              return (
-                <li className="history-item" key={item.id}>
-                  <div className="history-item-main">
-                    <div className="history-item-title">
-                      <span>{describeActivity(item, address)}</span>
-                      <span className={`history-status history-status-${item.status}`}>
-                        {item.status === "failed"
-                          ? "Failed"
-                          : item.status === "success"
-                            ? "Confirmed"
-                            : "Status unknown"}
-                      </span>
-                    </div>
-                    <time dateTime={new Date(item.timestamp * 1000).toISOString()}>
-                      {formatTimestamp(item.timestamp)}
-                    </time>
-                    <code className="history-counterparty">
-                      {counterparty ?? "Contract creation"}
-                    </code>
-                    <a
-                      className="history-hash"
-                      href={`https://sepolia.etherscan.io/tx/${item.hash}`}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      View transaction
-                    </a>
-                  </div>
-                  <p className="history-amount">
-                    {formatAmount(item)} <span>{symbol}</span>
-                  </p>
-                </li>
-              );
-            })}
-          </ol>
-        ) : null}
-
-        {error ? (
-          <button className="button button-outline history-more" onClick={retry} type="button">
-            {items.length > 0 ? "Try loading again" : "Try again"}
-          </button>
-        ) : nextCursor ? (
-          <button
-            className="button button-outline history-more"
-            onClick={() => void loadNextPage(nextCursor)}
-            type="button"
-            disabled={isLoading}
+          <div
+            id="history-tabpanel"
+            className="history-tabpanel"
+            role="tabpanel"
+            aria-labelledby={selectedTabId}
+            aria-busy={isLoading}
+            tabIndex={0}
           >
-            {isLoading ? "Loading..." : "Load more"}
-          </button>
-        ) : null}
-      </div>
+            {isLoading && items.length === 0 ? (
+              <p className="history-message" role="status">
+                Loading {HISTORY_TABS.find((tab) => tab.kind === selectedKind)?.label.toLowerCase()}...
+              </p>
+            ) : null}
+
+            {error ? (
+              <div className="history-error" role="alert">
+                <p>{error}</p>
+              </div>
+            ) : null}
+
+            {!isLoading && !error && items.length === 0 ? (
+              <p className="history-message">
+                No {HISTORY_TABS.find((tab) => tab.kind === selectedKind)?.label.toLowerCase()} found for
+                this address.
+              </p>
+            ) : null}
+
+            {items.length > 0 ? (
+              <ol className="history-list">
+                {items.map((item) => {
+                  const symbol = item.token?.symbol ?? native.symbol;
+                  const counterparty =
+                    item.from.toLowerCase() === address.toLowerCase()
+                      ? item.to
+                      : item.from;
+                  const explorerUrl = getExplorerTxUrl(chainId, item.hash);
+                  return (
+                    <li className="history-item" key={item.id}>
+                      <div className="history-item-main">
+                        <div className="history-item-title">
+                          <span>{describeActivity(item, address)}</span>
+                          <span className={`history-status history-status-${item.status}`}>
+                            {item.status === "failed"
+                              ? "Failed"
+                              : item.status === "success"
+                                ? "Confirmed"
+                                : "Status unknown"}
+                          </span>
+                        </div>
+                        <time dateTime={new Date(item.timestamp * 1000).toISOString()}>
+                          {formatTimestamp(item.timestamp)}
+                        </time>
+                        <code className="history-counterparty">
+                          {counterparty ?? "Contract creation"}
+                        </code>
+                        {explorerUrl ? (
+                          <a
+                            className="history-hash"
+                            href={explorerUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            View transaction
+                          </a>
+                        ) : null}
+                      </div>
+                      <p className="history-amount">
+                        {formatAmount(item, native.decimals)} <span>{symbol}</span>
+                      </p>
+                    </li>
+                  );
+                })}
+              </ol>
+            ) : null}
+
+            {error ? (
+              <button className="button button-outline history-more" onClick={retry} type="button">
+                {items.length > 0 ? "Try loading again" : "Try again"}
+              </button>
+            ) : nextCursor ? (
+              <button
+                className="button button-outline history-more"
+                onClick={() => void loadNextPage(nextCursor)}
+                type="button"
+                disabled={isLoading}
+              >
+                {isLoading ? "Loading..." : "Load more"}
+              </button>
+            ) : null}
+          </div>
+        </>
+      )}
     </section>
   );
 }

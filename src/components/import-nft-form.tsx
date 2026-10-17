@@ -4,11 +4,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import type { NftStandard } from "@/core/storage";
+import { useActiveChain } from "@/lib/use-active-chain";
 import { walletService } from "@/services/wallet-service";
 
 /** Imports an NFT (contract + token ID) into the selected account. */
 export function ImportNftForm() {
   const router = useRouter();
+  const { chainId, chain } = useActiveChain();
   const [contractAddress, setContractAddress] = useState("");
   const [tokenId, setTokenId] = useState("");
   const [standard, setStandard] = useState<NftStandard>("ERC-721");
@@ -20,7 +22,7 @@ export function ImportNftForm() {
     setError(null);
     setIsAdding(true);
     try {
-      await walletService.addNft(contractAddress, tokenId, standard);
+      await walletService.addNft(contractAddress, tokenId, standard, chainId);
       setContractAddress("");
       setTokenId("");
       router.push("/wallet?tab=nfts");
@@ -39,7 +41,7 @@ export function ImportNftForm() {
     <main className="page-main form-page">
       <section className="page-heading dashboard-heading">
         <div>
-          <p className="eyebrow">Sepolia assets</p>
+          <p className="eyebrow">{chain.name} assets</p>
           <h1>Import NFT</h1>
         </div>
         <Link className="button button-outline" href="/wallet?tab=nfts">

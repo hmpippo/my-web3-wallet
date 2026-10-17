@@ -59,7 +59,8 @@ function isHistoryPage(value: unknown): value is TransactionHistoryPage {
   return (
     Array.isArray(page.items) &&
     page.items.every(isHistoryItem) &&
-    (page.nextCursor === null || typeof page.nextCursor === "string")
+    (page.nextCursor === null || typeof page.nextCursor === "string") &&
+    (page.unavailable === undefined || typeof page.unavailable === "boolean")
   );
 }
 
@@ -67,13 +68,14 @@ export async function getTransactionHistory(
   address: Address,
   cursor: string | null,
   kind: TransactionHistoryKind | "all" = "all",
+  chainId: number,
 ): Promise<TransactionHistoryPage> {
   let response: Response;
   try {
     response = await fetch("/api/transactions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ address, cursor, kind }),
+      body: JSON.stringify({ address, cursor, kind, chainid: chainId }),
       cache: "no-store",
     });
   } catch {

@@ -5,7 +5,7 @@ const { readContract } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/core/chain", () => ({
-  publicClient: { readContract },
+  getPublicClient: () => ({ readContract }),
 }));
 
 import {
@@ -16,6 +16,7 @@ import {
 
 const TOKEN_ADDRESS = "0x0000000000000000000000000000000000000001";
 const WALLET_ADDRESS = "0x0000000000000000000000000000000000000002";
+const SEPOLIA = 11155111;
 
 describe("ERC-20 token service", () => {
   beforeEach(() => readContract.mockReset());
@@ -36,7 +37,7 @@ describe("ERC-20 token service", () => {
       .mockResolvedValueOnce(6);
 
     await expect(
-      readTokenMetadata(normalizeTokenAddress(TOKEN_ADDRESS)),
+      readTokenMetadata(normalizeTokenAddress(TOKEN_ADDRESS), SEPOLIA),
     ).resolves.toMatchObject({
       address: TOKEN_ADDRESS,
       name: "USD Coin",
@@ -49,7 +50,7 @@ describe("ERC-20 token service", () => {
   it("returns a clear error if contract metadata calls fail or are invalid", async () => {
     readContract.mockRejectedValue(new Error("RPC unavailable"));
     await expect(
-      readTokenMetadata(normalizeTokenAddress(TOKEN_ADDRESS)),
+      readTokenMetadata(normalizeTokenAddress(TOKEN_ADDRESS), SEPOLIA),
     ).rejects.toThrow("Could not read ERC-20 name, symbol, and decimals");
 
     readContract.mockReset();
@@ -58,7 +59,7 @@ describe("ERC-20 token service", () => {
       .mockResolvedValueOnce("BAD")
       .mockResolvedValueOnce(18);
     await expect(
-      readTokenMetadata(normalizeTokenAddress(TOKEN_ADDRESS)),
+      readTokenMetadata(normalizeTokenAddress(TOKEN_ADDRESS), SEPOLIA),
     ).rejects.toThrow("invalid token metadata");
   });
 
@@ -70,6 +71,7 @@ describe("ERC-20 token service", () => {
       getTokenBalance(
         { address: TOKEN_ADDRESS, decimals: 6, symbol: "USDC" },
         WALLET_ADDRESS,
+        SEPOLIA,
       ),
     ).resolves.toEqual({
       raw,

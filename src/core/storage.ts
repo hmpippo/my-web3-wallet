@@ -1,6 +1,7 @@
 import type { EncryptedVault } from "./crypto";
 import { accountDerivationPath } from "./hd-wallet";
 import { isSafeImageUri, MAX_IMAGE_URL_LENGTH } from "./url-safety";
+import { DEFAULT_CHAIN_ID, isSupportedChainId } from "./chain";
 import { getAddress } from "viem";
 
 export const VAULT_STORAGE_KEY = "wallet_vault_v1";
@@ -15,6 +16,7 @@ export interface StoredWalletAccount {
 }
 
 export interface StoredWalletToken {
+  readonly chainId: number;
   readonly address: `0x${string}`;
   readonly name: string;
   readonly symbol: string;
@@ -25,6 +27,7 @@ export interface StoredWalletToken {
 export type NftStandard = "ERC-721" | "ERC-1155";
 
 export interface StoredWalletNft {
+  readonly chainId: number;
   readonly address: `0x${string}`;
   readonly tokenId: string;
   readonly standard: NftStandard;
@@ -278,6 +281,7 @@ function parseStoredNfts(value: unknown): StoredWalletNft[] {
       throw new Error("Stored account metadata contains an invalid NFT");
     }
     return {
+      chainId: resolveStoredChainId(candidate.chainId),
       address,
       tokenId: tokenId.toString(),
       standard: candidate.standard,
@@ -290,7 +294,7 @@ function parseStoredNfts(value: unknown): StoredWalletNft[] {
   const keys = new Set(
     nfts.map(
       (nft) =>
-        `${nft.address.toLowerCase()}:${nft.tokenId}:${nft.standard}`,
+        `${nft.chainId}:${nft.address.toLowerCase()}:${nft.tokenId}:${nft.standard}`,
     ),
   );
   if (keys.size !== nfts.length) {
@@ -341,6 +345,7 @@ function parseStoredTokens(value: unknown): StoredWalletToken[] {
       throw new Error("Stored account metadata contains an invalid token");
     }
     return {
+      chainId: resolveStoredChainId(candidate.chainId),
       address,
       name: candidate.name.trim(),
       symbol: candidate.symbol.trim(),
@@ -349,11 +354,26 @@ function parseStoredTokens(value: unknown): StoredWalletToken[] {
     };
   });
 
-  const addresses = new Set(tokens.map((token) => token.address));
+  const addresses = new Set(
+    tokens.map((token) => `${token.chainId}:${token.address}`),
+  );
   if (addresses.size !== tokens.length) {
     throw new Error("Stored account metadata contains duplicate tokens");
   }
   return tokens;
+}
+
+/**
+ * Resolves a stored `chainId`. Legacy entries saved before multi-chain support
+ * have no chain and default to Sepolia; unknown chains are rejected so a
+ * tampered vault cannot point an asset at an unsupported network.
+ */
+function resolveStoredChainId(value: unknown): number {
+  if (value === undefined || value === null) return DEFAULT_CHAIN_ID;
+  if (!isSupportedChainId(value)) {
+    throw new Error("Stored account metadata references an unsupported chain");
+  }
+  return value;
 }
 
 function accountIndex(path: string): number | null {

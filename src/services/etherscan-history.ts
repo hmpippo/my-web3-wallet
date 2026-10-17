@@ -2,7 +2,7 @@ import "server-only";
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { isAddress, type Address, type Hash } from "viem";
-import { publicClient } from "@/core/chain";
+import { getChain, getPublicClient, supportsHistory } from "@/core/chain";
 import type {
   TransactionHistoryItem,
   TransactionHistoryKind,
@@ -11,7 +11,6 @@ import type {
 } from "@/types/transaction-history";
 
 const API_URL = "https://api.etherscan.io/v2/api";
-const CHAIN_ID = "11155111";
 const PAGE_SIZE = 10;
 const UPSTREAM_PAGE_SIZE = 20;
 const MAX_CURSOR_LENGTH = 100_000;
@@ -40,6 +39,7 @@ interface SourceCursor {
 
 interface CursorPayload {
   version: 1;
+  chainId: number;
   address: string;
   endBlock: string;
   kind: TransactionHistoryKind | "all";
@@ -58,6 +58,7 @@ export type HistoryServiceErrorCode =
   | "missing-key"
   | "rate-limit"
   | "provider"
+  | "unsupported"
   | "cursor";
 
 export class HistoryServiceError extends Error {
@@ -74,9 +75,11 @@ function emptyCursor(
   address: string,
   endBlock: string,
   kind: TransactionHistoryKind | "all",
+  chainId: number,
 ): CursorPayload {
   return {
     version: 1,
+    chainId,
     address,
     endBlock,
     kind,
@@ -217,16 +220,28 @@ function isRateLimitMessage(message: string): boolean {
   return /max rate limit|rate limit reached|too many requests/i.test(message);
 }
 
+/**
+ * Detects Etherscan responses that mean the chain is not on the caller's plan
+ * (for example a chain the free tier no longer covers). These are surfaced as
+ * "unsupported" so the UI can explain the gap instead of showing an error.
+ */
+function isUnsupportedMessage(message: string): boolean {
+  return /upgrade|paid plan|requires? a (?:paid|pro|standard|lite)|not available|not supported|api plan|higher plan|current plan/i.test(
+    message,
+  );
+}
+
 async function fetchSourcePage(
   address: string,
   endBlock: string,
   source: HistorySource,
   page: number,
   apiKey: string,
+  chainId: number,
 ): Promise<CursorItem[]> {
   const url = new URL(API_URL);
   url.search = new URLSearchParams({
-    chainid: CHAIN_ID,
+    chainid: String(chainId),
     module: "account",
     action: SOURCE_CONFIG[source].action,
     address,
@@ -274,6 +289,9 @@ async function fetchSourcePage(
     ].join(" ");
     if (isRateLimitMessage(errorText)) {
       throw new HistoryServiceError("rate-limit", "The transaction history provider is rate limiting requests.");
+    }
+    if (isUnsupportedMessage(errorText)) {
+      throw new HistoryServiceError("unsupported", "Activity is not available for this network.");
     }
     if (isEmptyResponse(apiResponse)) return [];
     throw new HistoryServiceError("provider", "The transaction history provider rejected the request.");
@@ -330,6 +348,7 @@ function decodeCursor(
   address: string,
   kind: TransactionHistoryKind | "all",
   apiKey: string,
+  chainId: number,
 ): CursorPayload {
   if (encoded.length > MAX_CURSOR_LENGTH) {
     throw new HistoryServiceError("cursor", "The transaction history cursor is invalid.");
@@ -369,6 +388,7 @@ function decodeCursor(
   if (
     !isRecord(parsed) ||
     parsed.version !== 1 ||
+    parsed.chainId !== chainId ||
     parsed.address !== address ||
     parsed.kind !== kind ||
     typeof parsed.endBlock !== "string" ||
@@ -430,10 +450,11 @@ async function fillSource(
   address: string,
   endBlock: string,
   apiKey: string,
+  chainId: number,
 ): Promise<void> {
   if (state.done || state.items.length > 0) return;
   const page = state.nextPage;
-  const items = await fetchSourcePage(address, endBlock, source, page, apiKey);
+  const items = await fetchSourcePage(address, endBlock, source, page, apiKey, chainId);
   state.nextPage += 1;
   state.done = items.length < UPSTREAM_PAGE_SIZE;
   state.items = items;
@@ -451,25 +472,29 @@ async function loadHistoryPage(
   cursorValue: string | null,
   kind: TransactionHistoryKind | "all",
   apiKey: string,
+  chainId: number,
 ): Promise<TransactionHistoryPage> {
   const normalizedAddress = address.toLowerCase();
   let payload: CursorPayload;
   if (cursorValue) {
-    payload = decodeCursor(cursorValue, normalizedAddress, kind, apiKey);
+    payload = decodeCursor(cursorValue, normalizedAddress, kind, apiKey, chainId);
   } else {
     let endBlock: bigint;
     try {
-      endBlock = await publicClient.getBlockNumber();
+      endBlock = await getPublicClient(chainId).getBlockNumber();
     } catch {
-      throw new HistoryServiceError("provider", "Could not determine the current Sepolia block.");
+      throw new HistoryServiceError(
+        "provider",
+        `Could not determine the current ${getChain(chainId).name} block.`,
+      );
     }
-    payload = emptyCursor(normalizedAddress, endBlock.toString(), kind);
+    payload = emptyCursor(normalizedAddress, endBlock.toString(), kind, chainId);
   }
   const sources = Object.keys(SOURCE_CONFIG) as HistorySource[];
 
   await Promise.all(
     sources.map((source) =>
-      fillSource(payload.sources[source], source, normalizedAddress, payload.endBlock, apiKey),
+      fillSource(payload.sources[source], source, normalizedAddress, payload.endBlock, apiKey, chainId),
     ),
   );
 
@@ -483,7 +508,7 @@ async function loadHistoryPage(
       if (unfinished.length === 0) break;
       await Promise.all(
         unfinished.map((source) =>
-          fillSource(payload.sources[source], source, normalizedAddress, payload.endBlock, apiKey),
+          fillSource(payload.sources[source], source, normalizedAddress, payload.endBlock, apiKey, chainId),
         ),
       );
       continue;
@@ -499,6 +524,7 @@ async function loadHistoryPage(
         normalizedAddress,
         payload.endBlock,
         apiKey,
+        chainId,
       );
     }
   }
@@ -507,7 +533,7 @@ async function loadHistoryPage(
     sources
       .filter((source) => payload.sources[source].items.length === 0 && !payload.sources[source].done)
       .map((source) =>
-        fillSource(payload.sources[source], source, normalizedAddress, payload.endBlock, apiKey),
+        fillSource(payload.sources[source], source, normalizedAddress, payload.endBlock, apiKey, chainId),
       ),
   );
 
@@ -523,9 +549,17 @@ async function loadHistoryPage(
 
 export async function getEtherscanHistory(
   address: Address,
-  cursorValue?: string | null,
-  kind: TransactionHistoryKind | "all" = "all",
+  cursorValue: string | null | undefined,
+  kind: TransactionHistoryKind | "all",
+  chainId: number,
 ): Promise<TransactionHistoryPage> {
+  if (!supportsHistory(chainId)) {
+    throw new HistoryServiceError(
+      "unsupported",
+      `Activity is not available for ${getChain(chainId).name}.`,
+    );
+  }
+
   const apiKey = process.env.ETHERSCAN_API_KEY?.trim();
   if (!apiKey) {
     throw new HistoryServiceError("missing-key", "Transaction history is not configured on this server.");
@@ -533,11 +567,17 @@ export async function getEtherscanHistory(
 
   const normalizedAddress = address.toLowerCase();
   const normalizedCursor = cursorValue ?? null;
-  const requestKey = `${normalizedAddress}:${kind}:${normalizedCursor ?? "first-page"}`;
+  const requestKey = `${chainId}:${normalizedAddress}:${kind}:${normalizedCursor ?? "first-page"}`;
   const existingRequest = inFlightPages.get(requestKey);
   if (existingRequest) return existingRequest;
 
-  const request = loadHistoryPage(normalizedAddress as Address, normalizedCursor, kind, apiKey);
+  const request = loadHistoryPage(
+    normalizedAddress as Address,
+    normalizedCursor,
+    kind,
+    apiKey,
+    chainId,
+  );
   inFlightPages.set(requestKey, request);
   try {
     return await request;

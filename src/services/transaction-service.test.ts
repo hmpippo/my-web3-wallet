@@ -9,8 +9,9 @@ const { estimateGas, getGasPrice, sendTransaction, walletClientFactory } =
   }));
 
 vi.mock("@/core/chain", () => ({
-  CHAIN: { id: 11155111 },
-  publicClient: { estimateGas, getGasPrice },
+  getPublicClient: () => ({ estimateGas, getGasPrice }),
+  getChain: () => ({ id: 11155111 }),
+  getRpcUrl: () => "https://rpc.test",
 }));
 
 vi.mock("viem", async (importOriginal) => {
@@ -29,6 +30,8 @@ import {
   sendNativeTransfer,
 } from "./transaction-service";
 
+const SEPOLIA = 11155111;
+
 describe("native transfer validation", () => {
   beforeEach(() => {
     estimateGas.mockReset().mockResolvedValue(BigInt(21_000));
@@ -44,6 +47,7 @@ describe("native transfer validation", () => {
       sendNativeTransfer({
         to: "not-an-address" as `0x${string}`,
         value: BigInt(1),
+        chainId: SEPOLIA,
         privateKey: `0x${"1".repeat(64)}`,
       }),
     ).rejects.toThrow("Recipient address is invalid");
@@ -54,6 +58,7 @@ describe("native transfer validation", () => {
       sendNativeTransfer({
         to: "0x0000000000000000000000000000000000000001",
         value: BigInt(0),
+        chainId: SEPOLIA,
         privateKey: `0x${"1".repeat(64)}`,
       }),
     ).rejects.toThrow("greater than zero");
@@ -66,7 +71,7 @@ describe("native transfer validation", () => {
     const hash = `0x${"a".repeat(64)}` as `0x${string}`;
 
     await expect(
-      sendNativeTransfer({ to, value, privateKey }),
+      sendNativeTransfer({ to, value, chainId: SEPOLIA, privateKey }),
     ).resolves.toBe(hash);
 
     expect(estimateGas).toHaveBeenCalledWith(
@@ -91,7 +96,7 @@ describe("native transfer validation", () => {
     const gas = BigInt(23_000);
     const gasPrice = BigInt(12);
 
-    await sendNativeTransfer({ to, value, privateKey, gas, gasPrice });
+    await sendNativeTransfer({ to, value, chainId: SEPOLIA, privateKey, gas, gasPrice });
 
     expect(estimateGas).not.toHaveBeenCalled();
     expect(getGasPrice).not.toHaveBeenCalled();
@@ -119,12 +124,19 @@ describe("ERC-20 transfer", () => {
         token,
         to: "not-an-address" as `0x${string}`,
         amount: BigInt(1),
+        chainId: SEPOLIA,
         privateKey,
       }),
     ).rejects.toThrow("Recipient address is invalid");
 
     await expect(
-      sendErc20Transfer({ token, to: recipient, amount: BigInt(0), privateKey }),
+      sendErc20Transfer({
+        token,
+        to: recipient,
+        amount: BigInt(0),
+        chainId: SEPOLIA,
+        privateKey,
+      }),
     ).rejects.toThrow("greater than zero");
 
     expect(estimateGas).not.toHaveBeenCalled();
@@ -137,7 +149,7 @@ describe("ERC-20 transfer", () => {
     const data = encodeErc20Transfer(recipient, amount);
 
     await expect(
-      sendErc20Transfer({ token, to: recipient, amount, privateKey }),
+      sendErc20Transfer({ token, to: recipient, amount, chainId: SEPOLIA, privateKey }),
     ).resolves.toBe(hash);
 
     expect(estimateGas).toHaveBeenCalledWith(
@@ -160,6 +172,7 @@ describe("ERC-20 transfer", () => {
       token,
       to: recipient,
       amount: BigInt(5),
+      chainId: SEPOLIA,
       privateKey,
       gas: BigInt(65_000),
       gasPrice: BigInt(12),
@@ -184,6 +197,7 @@ describe("ERC-20 transfer", () => {
         token,
         to: recipient,
         amount: BigInt(7),
+        chainId: SEPOLIA,
       }),
     ).resolves.toEqual({
       gas: BigInt(60_000),

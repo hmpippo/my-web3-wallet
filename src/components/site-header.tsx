@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ChainSwitcher } from "@/components/chain-switcher";
 
 export function SiteHeader() {
   return (
@@ -9,10 +10,13 @@ export function SiteHeader() {
         </span>
         <span>my wallet</span>
       </Link>
-      <nav aria-label="Main navigation" className="header-nav">
-        <Link href="/wallet">Wallet</Link>
-        <Link href="/send">Send</Link>
-      </nav>
+      <div className="header-tools">
+        <nav aria-label="Main navigation" className="header-nav">
+          <Link href="/wallet">Wallet</Link>
+          <Link href="/send">Send</Link>
+        </nav>
+        <ChainSwitcher />
+      </div>
     </header>
   );
 }

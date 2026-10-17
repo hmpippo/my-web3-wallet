@@ -24,6 +24,7 @@ import {
   type WalletAccountMetadata,
 } from "@/core/storage";
 import { sendErc20Transfer, sendNativeTransfer } from "./transaction-service";
+import { chainService } from "./chain-service";
 import {
   normalizeNftAddress,
   parseNftTokenId,
@@ -61,21 +62,25 @@ export interface WalletServiceDependencies {
   storage?: StorageService;
   readTokenMetadata?: (
     address: Address,
+    chainId: number,
   ) => Promise<Omit<StoredWalletToken, "hidden">>;
   readNftMetadata?: (
     address: Address,
     tokenId: bigint,
     standard: NftStandard,
+    chainId: number,
   ) => Promise<StoredWalletNft>;
   readNftOwnership?: (
     address: Address,
     tokenId: bigint,
     standard: NftStandard,
     owner: Address,
+    chainId: number,
   ) => Promise<boolean>;
   sendTransfer?: (params: {
     to: Address;
     value: bigint;
+    chainId: number;
     privateKey: Hex;
     gas?: bigint;
     gasPrice?: bigint;
@@ -84,10 +89,13 @@ export interface WalletServiceDependencies {
     token: Address;
     to: Address;
     amount: bigint;
+    chainId: number;
     privateKey: Hex;
     gas?: bigint;
     gasPrice?: bigint;
   }) => Promise<Hash>;
+  /** Supplies the chain used by background work (NFT ownership sync). */
+  getActiveChainId?: () => number;
 }
 
 interface PendingWallet extends PreparedWallet {
@@ -128,6 +136,9 @@ export class WalletService {
   private readonly readNftOwnership: NonNullable<
     WalletServiceDependencies["readNftOwnership"]
   >;
+  private readonly getActiveChainId: NonNullable<
+    WalletServiceDependencies["getActiveChainId"]
+  >;
 
   constructor(dependencies: WalletServiceDependencies = {}) {
     this.storage = dependencies.storage ?? storageService;
@@ -137,6 +148,8 @@ export class WalletService {
     this.readTokenMetadata = dependencies.readTokenMetadata ?? readTokenMetadata;
     this.readNftMetadata = dependencies.readNftMetadata ?? readNftMetadata;
     this.readNftOwnership = dependencies.readNftOwnership ?? readNftOwnership;
+    this.getActiveChainId =
+      dependencies.getActiveChainId ?? (() => chainService.activeChainId);
   }
 
   get isUnlocked(): boolean {
@@ -492,7 +505,7 @@ export class WalletService {
     }
   }
 
-  async addToken(address: string): Promise<StoredWalletToken> {
+  async addToken(address: string, chainId: number): Promise<StoredWalletToken> {
     if (!this.state.isUnlocked) throw new Error("Wallet is locked");
     const selectedIndex = this.state.selectedAccountIndex;
     const account = this.state.accounts.find(
@@ -503,6 +516,7 @@ export class WalletService {
     if (
       account.tokens.some(
         (token) =>
+          token.chainId === chainId &&
           token.address.toLowerCase() === normalizedAddress.toLowerCase(),
       )
     ) {
@@ -511,11 +525,12 @@ export class WalletService {
     const mutationVersion = this.beginAccountMutation();
     const operationVersion = this.operationVersion;
     try {
-      const metadata = await this.readTokenMetadata(normalizedAddress);
+      const metadata = await this.readTokenMetadata(normalizedAddress, chainId);
       this.assertOperationCurrent(operationVersion);
       if (
         account.tokens.some(
           (token) =>
+            token.chainId === chainId &&
             token.address.toLowerCase() === metadata.address.toLowerCase(),
         )
       ) {
@@ -536,18 +551,19 @@ export class WalletService {
     }
   }
 
-  async hideToken(address: Address): Promise<void> {
-    await this.setTokenVisibility(address, true);
+  async hideToken(address: Address, chainId: number): Promise<void> {
+    await this.setTokenVisibility(address, chainId, true);
   }
 
-  async restoreToken(address: Address): Promise<void> {
-    await this.setTokenVisibility(address, false);
+  async restoreToken(address: Address, chainId: number): Promise<void> {
+    await this.setTokenVisibility(address, chainId, false);
   }
 
   async addNft(
     contractAddress: string,
     tokenIdInput: string,
     standard: NftStandard,
+    chainId: number,
   ): Promise<StoredWalletNft> {
     if (!this.state.isUnlocked) throw new Error("Wallet is locked");
     if (standard !== "ERC-721" && standard !== "ERC-1155") {
@@ -563,6 +579,7 @@ export class WalletService {
     if (
       account.nfts.some(
         (nft) =>
+          nft.chainId === chainId &&
           nft.address.toLowerCase() === address.toLowerCase() &&
           nft.tokenId === tokenId &&
           nft.standard === standard,
@@ -579,12 +596,14 @@ export class WalletService {
         BigInt(tokenId),
         standard,
         account.address,
+        chainId,
       );
       this.assertOperationCurrent(operationVersion);
       const nft = await this.readNftMetadata(
         address,
         BigInt(tokenId),
         standard,
+        chainId,
       );
       this.assertOperationCurrent(operationVersion);
       const currentAccount = this.state.accounts.find(
@@ -594,6 +613,7 @@ export class WalletService {
       if (
         currentAccount.nfts.some(
           (candidate) =>
+            candidate.chainId === chainId &&
             candidate.address.toLowerCase() === address.toLowerCase() &&
             candidate.tokenId === tokenId &&
             candidate.standard === standard,
@@ -619,6 +639,7 @@ export class WalletService {
     addressInput: Address,
     tokenIdInput: string,
     standard: NftStandard,
+    chainId: number,
   ): Promise<void> {
     if (!this.state.isUnlocked) throw new Error("Wallet is locked");
     const selectedIndex = this.state.selectedAccountIndex;
@@ -631,6 +652,7 @@ export class WalletService {
     if (
       !selected.nfts.some(
         (nft) =>
+          nft.chainId === chainId &&
           nft.address.toLowerCase() === address.toLowerCase() &&
           nft.tokenId === tokenId &&
           nft.standard === standard,
@@ -647,6 +669,7 @@ export class WalletService {
               ...candidate,
               nfts: candidate.nfts.filter(
                 (nft) =>
+                  nft.chainId !== chainId ||
                   nft.address.toLowerCase() !== address.toLowerCase() ||
                   nft.tokenId !== tokenId ||
                   nft.standard !== standard,
@@ -678,7 +701,9 @@ export class WalletService {
    * Best-effort by design: it never rejects, because callers fire it without
    * awaiting. Awaiting the returned promise waits for the reconciliation.
    */
-  async syncNftOwnership(): Promise<void> {
+  async syncNftOwnership(
+    chainId: number = this.getActiveChainId(),
+  ): Promise<void> {
     if (this.nftOwnershipSyncInProgress) return;
     this.nftOwnershipSyncInProgress = true;
     try {
@@ -686,13 +711,15 @@ export class WalletService {
       const account = this.state.accounts.find(
         (candidate) => candidate.index === this.state.selectedAccountIndex,
       );
-      if (!account || account.nfts.length === 0) return;
+      if (!account) return;
+      const chainNfts = account.nfts.filter((nft) => nft.chainId === chainId);
+      if (chainNfts.length === 0) return;
       const operationVersion = this.operationVersion;
 
       // The network reads happen outside the mutation guard: a slow RPC must
       // never block the user from adding or removing an entry.
       const unowned = new Set<string>();
-      for (const nft of account.nfts) {
+      for (const nft of chainNfts) {
         if (operationVersion !== this.operationVersion) return;
         try {
           const owned = await this.readNftOwnership(
@@ -700,6 +727,7 @@ export class WalletService {
             BigInt(nft.tokenId),
             nft.standard,
             account.address,
+            chainId,
           );
           if (!owned) unowned.add(nftIdentity(nft));
         } catch {
@@ -742,6 +770,7 @@ export class WalletService {
 
   private async setTokenVisibility(
     address: Address,
+    chainId: number,
     hidden: boolean,
   ): Promise<void> {
     if (!this.state.isUnlocked) throw new Error("Wallet is locked");
@@ -751,7 +780,9 @@ export class WalletService {
     );
     if (!selected) throw new Error("Wallet is locked");
     const target = selected.tokens.find(
-      (token) => token.address.toLowerCase() === address.toLowerCase(),
+      (token) =>
+        token.chainId === chainId &&
+        token.address.toLowerCase() === address.toLowerCase(),
     );
     if (!target) throw new RangeError("Token does not exist in this account");
     if (target.hidden === hidden) return;
@@ -764,6 +795,7 @@ export class WalletService {
           ? {
               ...candidate,
               tokens: candidate.tokens.map((token) =>
+                token.chainId === chainId &&
                 token.address.toLowerCase() === address.toLowerCase()
                   ? { ...token, hidden }
                   : token,
@@ -783,6 +815,7 @@ export class WalletService {
     from: Address;
     to: Address;
     value: bigint;
+    chainId: number;
     estimate?: NativeTransferEstimate;
   }): Promise<Hash> {
     const selectedAccount = this.state.accounts.find(
@@ -801,6 +834,7 @@ export class WalletService {
     return this.sendTransfer({
       to: tx.to,
       value: tx.value,
+      chainId: tx.chainId,
       gas: tx.estimate?.gas,
       gasPrice: tx.estimate?.gasPrice,
       privateKey,
@@ -819,6 +853,7 @@ export class WalletService {
     token: Address;
     to: Address;
     amount: bigint;
+    chainId: number;
     estimate?: Erc20TransferEstimate;
   }): Promise<Hash> {
     const selectedAccount = this.state.accounts.find(
@@ -832,6 +867,7 @@ export class WalletService {
     }
     const token = selectedAccount.tokens.find(
       (candidate) =>
+        candidate.chainId === tx.chainId &&
         candidate.address.toLowerCase() === tx.token.toLowerCase(),
     );
     if (!token || token.hidden) {
@@ -845,6 +881,7 @@ export class WalletService {
       token: token.address,
       to: tx.to,
       amount: tx.amount,
+      chainId: tx.chainId,
       gas: tx.estimate?.gas,
       gasPrice: tx.estimate?.gasPrice,
       privateKey,
@@ -862,10 +899,17 @@ export class WalletService {
     tokenId: bigint,
     standard: NftStandard,
     owner: Address,
+    chainId: number,
   ): Promise<void> {
     let owned: boolean;
     try {
-      owned = await this.readNftOwnership(address, tokenId, standard, owner);
+      owned = await this.readNftOwnership(
+        address,
+        tokenId,
+        standard,
+        owner,
+        chainId,
+      );
     } catch (error) {
       throw new Error(
         `Could not verify NFT ownership. Confirm the contract, token ID, and standard, then retry.${
@@ -999,7 +1043,23 @@ async function deriveAccountFromMnemonic(mnemonic: string, index: number) {
 }
 
 function nftIdentity(nft: StoredWalletNft): string {
-  return `${nft.address.toLowerCase()}:${nft.tokenId}:${nft.standard}`;
+  return `${nft.chainId}:${nft.address.toLowerCase()}:${nft.tokenId}:${nft.standard}`;
+}
+
+/** Tokens stored for one account on one chain. */
+export function selectAccountTokens(
+  account: WalletAccount,
+  chainId: number,
+): readonly StoredWalletToken[] {
+  return account.tokens.filter((token) => token.chainId === chainId);
+}
+
+/** NFTs stored for one account on one chain. */
+export function selectAccountNfts(
+  account: WalletAccount,
+  chainId: number,
+): readonly StoredWalletNft[] {
+  return account.nfts.filter((nft) => nft.chainId === chainId);
 }
 
 function createWalletAccount(index: number, address: Address): WalletAccount {

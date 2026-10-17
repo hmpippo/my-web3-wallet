@@ -1,4 +1,5 @@
 import { isAddress, type Address } from "viem";
+import { isSupportedChainId } from "@/core/chain";
 import {
   getEtherscanHistory,
   HistoryServiceError,
@@ -73,15 +74,27 @@ export async function POST(request: Request): Promise<Response> {
     body === null ||
     Array.isArray(body) ||
     !("address" in body) ||
-    Object.keys(body).some((key) => key !== "address" && key !== "cursor" && key !== "kind")
+    Object.keys(body).some(
+      (key) =>
+        key !== "address" &&
+        key !== "cursor" &&
+        key !== "kind" &&
+        key !== "chainid",
+    )
   ) {
     return jsonError("The history request is invalid.", 400);
   }
 
-  const requestBody = body as { address?: unknown; cursor?: unknown; kind?: unknown };
+  const requestBody = body as {
+    address?: unknown;
+    cursor?: unknown;
+    kind?: unknown;
+    chainid?: unknown;
+  };
   if (
     typeof requestBody.address !== "string" ||
     !isAddress(requestBody.address, { strict: false }) ||
+    !isSupportedChainId(requestBody.chainid) ||
     (requestBody.cursor !== undefined &&
       requestBody.cursor !== null &&
       typeof requestBody.cursor !== "string") ||
@@ -99,6 +112,7 @@ export async function POST(request: Request): Promise<Response> {
       requestBody.address.toLowerCase() as Address,
       typeof requestBody.cursor === "string" ? requestBody.cursor : null,
       (requestBody.kind ?? "all") as TransactionHistoryKind | "all",
+      requestBody.chainid,
     );
     return Response.json(history, {
       headers: { "Cache-Control": "no-store" },
@@ -112,6 +126,11 @@ export async function POST(request: Request): Promise<Response> {
           return jsonError("The history cursor is invalid. Refresh history to continue.", 400);
         case "rate-limit":
           return jsonError("The history provider is busy. Try again shortly.", 429);
+        case "unsupported":
+          return Response.json(
+            { items: [], nextCursor: null, unavailable: true },
+            { headers: { "Cache-Control": "no-store" } },
+          );
         case "provider":
           return jsonError("Could not load transaction history. Try again later.", 502);
       }

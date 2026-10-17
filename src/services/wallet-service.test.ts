@@ -17,6 +17,7 @@ const LOCKED_STATE = {
   accounts: [],
   selectedAccountIndex: null,
 };
+const SEPOLIA = 11155111;
 
 function createStorage(
   initialVault: EncryptedVault | null = null,
@@ -204,6 +205,7 @@ describe("WalletService", () => {
       from: EXPECTED_ADDRESS as `0x${string}`,
       to: "0x0000000000000000000000000000000000000001" as `0x${string}`,
       value: BigInt(1),
+      chainId: SEPOLIA,
     };
     const estimate = {
       gas: BigInt(21_000),
@@ -223,6 +225,7 @@ describe("WalletService", () => {
     expect(sendTransfer).toHaveBeenCalledWith({
       to: transaction.to,
       value: transaction.value,
+      chainId: SEPOLIA,
       gas: estimate.gas,
       gasPrice: estimate.gasPrice,
       privateKey: expect.stringMatching(/^0x[0-9a-f]{64}$/),
@@ -342,6 +345,7 @@ describe("WalletService", () => {
       from: SECOND_ADDRESS as `0x${string}`,
       to: "0x0000000000000000000000000000000000000001" as `0x${string}`,
       value: BigInt(1),
+      chainId: SEPOLIA,
     };
     await service.signAndSendTransaction(transaction);
     const seed = await mnemonicToSeed(TEST_MNEMONIC);
@@ -351,6 +355,7 @@ describe("WalletService", () => {
     expect(sendTransfer).toHaveBeenLastCalledWith({
       to: transaction.to,
       value: transaction.value,
+      chainId: SEPOLIA,
       gas: undefined,
       gasPrice: undefined,
       privateKey: expectedPrivateKey,
@@ -365,12 +370,15 @@ describe("WalletService", () => {
 
   it("only signs and sends ERC-20 transfers for tokens added and visible in the account", async () => {
     const sendTokenTransfer = vi.fn(async () => "0xabc" as `0x${string}`);
-    const readTokenMetadata = vi.fn(async (address: `0x${string}`) => ({
-      address,
-      name: "Test Token",
-      symbol: "TST",
-      decimals: 6,
-    }));
+    const readTokenMetadata = vi.fn(
+      async (address: `0x${string}`, chainId: number) => ({
+        chainId,
+        address,
+        name: "Test Token",
+        symbol: "TST",
+        decimals: 6,
+      }),
+    );
     const service = new WalletService({
       storage: createStorage().storage,
       sendTokenTransfer,
@@ -382,6 +390,7 @@ describe("WalletService", () => {
       token,
       to: "0x0000000000000000000000000000000000000001" as `0x${string}`,
       amount: BigInt(1_000),
+      chainId: SEPOLIA,
     };
     const estimate = {
       gas: BigInt(60_000),
@@ -400,7 +409,7 @@ describe("WalletService", () => {
     );
     expect(sendTokenTransfer).not.toHaveBeenCalled();
 
-    await service.addToken(token);
+    await service.addToken(token, SEPOLIA);
     await expect(
       service.signAndSendTokenTransfer({ ...transfer, estimate }),
     ).resolves.toBe("0xabc");
@@ -408,12 +417,13 @@ describe("WalletService", () => {
       token,
       to: transfer.to,
       amount: transfer.amount,
+      chainId: SEPOLIA,
       gas: estimate.gas,
       gasPrice: estimate.gasPrice,
       privateKey: expect.stringMatching(/^0x[0-9a-f]{64}$/),
     });
 
-    await service.hideToken(token);
+    await service.hideToken(token, SEPOLIA);
     await expect(service.signAndSendTokenTransfer(transfer)).rejects.toThrow(
       "not available",
     );
@@ -422,12 +432,15 @@ describe("WalletService", () => {
 
   it("rejects an ERC-20 transfer when the selected account changed", async () => {
     const sendTokenTransfer = vi.fn(async () => "0xabc" as `0x${string}`);
-    const readTokenMetadata = vi.fn(async (address: `0x${string}`) => ({
-      address,
-      name: "Test Token",
-      symbol: "TST",
-      decimals: 6,
-    }));
+    const readTokenMetadata = vi.fn(
+      async (address: `0x${string}`, chainId: number) => ({
+        chainId,
+        address,
+        name: "Test Token",
+        symbol: "TST",
+        decimals: 6,
+      }),
+    );
     const service = new WalletService({
       storage: createStorage().storage,
       sendTokenTransfer,
@@ -435,7 +448,7 @@ describe("WalletService", () => {
     });
     await service.importWallet(TEST_MNEMONIC, "correct horse");
     const token = "0x0000000000000000000000000000000000000009" as `0x${string}`;
-    await service.addToken(token);
+    await service.addToken(token, SEPOLIA);
     await service.addAccount();
 
     await expect(
@@ -444,6 +457,7 @@ describe("WalletService", () => {
         token,
         to: "0x0000000000000000000000000000000000000001" as `0x${string}`,
         amount: BigInt(1),
+        chainId: SEPOLIA,
       }),
     ).rejects.toThrow("Selected account changed");
     expect(sendTokenTransfer).not.toHaveBeenCalled();
@@ -543,7 +557,8 @@ describe("WalletService", () => {
 
   it("manages tokens per selected account and persists hidden entries", async () => {
     const { storage, getAccountMetadata } = createStorage();
-    const readMetadata = vi.fn(async (address: `0x${string}`) => ({
+    const readMetadata = vi.fn(async (address: `0x${string}`, chainId: number) => ({
+      chainId,
       address,
       name: "Test Token",
       symbol: "TST",
@@ -558,25 +573,27 @@ describe("WalletService", () => {
 
     const token = await service.addToken(
       "0x0000000000000000000000000000000000000001",
+      SEPOLIA,
     );
     expect(token).toMatchObject({ symbol: "TST", hidden: false });
     await expect(
-      service.addToken("0x0000000000000000000000000000000000000001"),
+      service.addToken("0x0000000000000000000000000000000000000001", SEPOLIA),
     ).rejects.toThrow("already in the selected account");
 
     await service.selectAccount(0);
     expect(service.getState().accounts[0]?.tokens).toEqual([]);
     await expect(
-      service.addToken("0x0000000000000000000000000000000000000001"),
+      service.addToken("0x0000000000000000000000000000000000000001", SEPOLIA),
     ).resolves.toMatchObject({ symbol: "TST" });
-    await service.hideToken(token.address);
+    await service.hideToken(token.address, SEPOLIA);
     expect(service.getState().accounts[0]?.tokens[0]?.hidden).toBe(true);
-    await service.restoreToken(token.address);
+    await service.restoreToken(token.address, SEPOLIA);
     expect(service.getState().accounts[0]?.tokens[0]?.hidden).toBe(false);
 
     expect(getAccountMetadata()?.accounts.map((account) => account.tokens)).toEqual([
       [
         {
+          chainId: SEPOLIA,
           address: "0x0000000000000000000000000000000000000001",
           name: "Test Token",
           symbol: "TST",
@@ -586,6 +603,7 @@ describe("WalletService", () => {
       ],
       [
         {
+          chainId: SEPOLIA,
           address: "0x0000000000000000000000000000000000000001",
           name: "Test Token",
           symbol: "TST",
@@ -606,11 +624,11 @@ describe("WalletService", () => {
     });
     await service.importWallet(TEST_MNEMONIC, "correct horse");
 
-    await expect(service.addToken("invalid")).rejects.toThrow(
+    await expect(service.addToken("invalid", SEPOLIA)).rejects.toThrow(
       "valid ERC-20 contract address",
     );
     await expect(
-      service.addToken("0x0000000000000000000000000000000000000001"),
+      service.addToken("0x0000000000000000000000000000000000000001", SEPOLIA),
     ).rejects.toThrow("Could not read ERC-20 metadata");
     expect(service.getState().accounts[0]?.tokens).toEqual([]);
   });
@@ -622,7 +640,9 @@ describe("WalletService", () => {
         address: `0x${string}`,
         tokenId: bigint,
         standard: "ERC-721" | "ERC-1155",
+        chainId: number,
       ) => ({
+        chainId,
         address,
         tokenId: tokenId.toString(),
         standard,
@@ -643,6 +663,7 @@ describe("WalletService", () => {
       "0x0000000000000000000000000000000000000001",
       "00042",
       "ERC-721",
+      SEPOLIA,
     );
     expect(nft).toMatchObject({
       tokenId: "42",
@@ -654,6 +675,7 @@ describe("WalletService", () => {
         "0x0000000000000000000000000000000000000001",
         "42",
         "ERC-721",
+        SEPOLIA,
       ),
     ).rejects.toThrow("already listed");
 
@@ -664,12 +686,14 @@ describe("WalletService", () => {
         "0x0000000000000000000000000000000000000001",
         "42",
         "ERC-721",
+        SEPOLIA,
       ),
     ).resolves.toMatchObject({ name: "Test NFT" });
     await service.removeNft(
       "0x0000000000000000000000000000000000000001",
       "42",
       "ERC-721",
+      SEPOLIA,
     );
     expect(service.getState().accounts[0]?.nfts).toEqual([]);
 
@@ -677,6 +701,7 @@ describe("WalletService", () => {
       [],
       [
         {
+          chainId: SEPOLIA,
           address: "0x0000000000000000000000000000000000000001",
           tokenId: "42",
           standard: "ERC-721",
@@ -700,7 +725,7 @@ describe("WalletService", () => {
     });
     await service.importWallet(TEST_MNEMONIC, "correct horse");
 
-    await expect(service.addNft("invalid", "1", "ERC-721")).rejects.toThrow(
+    await expect(service.addNft("invalid", "1", "ERC-721", SEPOLIA)).rejects.toThrow(
       "valid NFT contract address",
     );
     await expect(
@@ -708,6 +733,7 @@ describe("WalletService", () => {
         "0x0000000000000000000000000000000000000001",
         "1",
         "ERC-721",
+        SEPOLIA,
       ),
     ).rejects.toThrow("NFT metadata could not be loaded");
     expect(service.getState().accounts[0]?.nfts).toEqual([]);
@@ -732,6 +758,7 @@ describe("WalletService", () => {
         "0x0000000000000000000000000000000000000001",
         "42",
         "ERC-721",
+        SEPOLIA,
       ),
     ).rejects.toThrow("does not own");
     expect(readOwnership).toHaveBeenCalledWith(
@@ -739,6 +766,7 @@ describe("WalletService", () => {
       BigInt("42"),
       "ERC-721",
       EXPECTED_ADDRESS,
+      SEPOLIA,
     );
     expect(readMetadata).not.toHaveBeenCalled();
     expect(service.getState().accounts[0]?.nfts).toEqual([]);
@@ -763,6 +791,7 @@ describe("WalletService", () => {
         "0x0000000000000000000000000000000000000001",
         "42",
         "ERC-1155",
+        SEPOLIA,
       ),
     ).rejects.toThrow(/Could not verify NFT ownership.*execution reverted/);
     expect(service.getState().accounts[0]?.nfts).toEqual([]);
@@ -777,7 +806,8 @@ describe("WalletService", () => {
     );
     const service = new WalletService({
       storage,
-      readNftMetadata: vi.fn(async (address, tokenId, standard) => ({
+      readNftMetadata: vi.fn(async (address, tokenId, standard, chainId) => ({
+        chainId,
         address,
         tokenId: tokenId.toString(),
         standard,
@@ -792,11 +822,13 @@ describe("WalletService", () => {
       "0x0000000000000000000000000000000000000001",
       "1",
       "ERC-721",
+      SEPOLIA,
     );
     await service.addNft(
       "0x0000000000000000000000000000000000000002",
       "7",
       "ERC-1155",
+      SEPOLIA,
     );
 
     // The ERC-1155 token was transferred away in the meantime.
@@ -822,6 +854,7 @@ describe("WalletService", () => {
       BigInt("7"),
       "ERC-1155",
       EXPECTED_ADDRESS,
+      SEPOLIA,
     );
   });
 
@@ -830,7 +863,8 @@ describe("WalletService", () => {
     const readOwnership = vi.fn(async () => true);
     const service = new WalletService({
       storage,
-      readNftMetadata: vi.fn(async (address, tokenId, standard) => ({
+      readNftMetadata: vi.fn(async (address, tokenId, standard, chainId) => ({
+        chainId,
         address,
         tokenId: tokenId.toString(),
         standard,
@@ -845,6 +879,7 @@ describe("WalletService", () => {
       "0x0000000000000000000000000000000000000001",
       "1",
       "ERC-721",
+      SEPOLIA,
     );
 
     readOwnership.mockRejectedValue(new Error("rpc unavailable"));
@@ -873,7 +908,8 @@ describe("WalletService", () => {
     const readOwnership = vi.fn(async () => true);
     const service = new WalletService({
       storage,
-      readNftMetadata: vi.fn(async (address, tokenId, standard) => ({
+      readNftMetadata: vi.fn(async (address, tokenId, standard, chainId) => ({
+        chainId,
         address,
         tokenId: tokenId.toString(),
         standard,
@@ -888,6 +924,7 @@ describe("WalletService", () => {
       "0x0000000000000000000000000000000000000002",
       "7",
       "ERC-721",
+      SEPOLIA,
     );
 
     // The token was transferred away while the wallet was locked, so unlocking
@@ -912,7 +949,8 @@ describe("WalletService", () => {
     const readOwnership = vi.fn(async () => true);
     const service = new WalletService({
       storage,
-      readNftMetadata: vi.fn(async (address, tokenId, standard) => ({
+      readNftMetadata: vi.fn(async (address, tokenId, standard, chainId) => ({
+        chainId,
         address,
         tokenId: tokenId.toString(),
         standard,
@@ -927,6 +965,7 @@ describe("WalletService", () => {
       "0x0000000000000000000000000000000000000001",
       "1",
       "ERC-721",
+      SEPOLIA,
     );
 
     // The re-check of the older entry hangs and then reports it as unowned.
@@ -940,6 +979,7 @@ describe("WalletService", () => {
       "0x0000000000000000000000000000000000000002",
       "7",
       "ERC-1155",
+      SEPOLIA,
     );
     releaseStaleRead?.();
     await sync;

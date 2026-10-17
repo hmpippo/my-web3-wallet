@@ -63,8 +63,9 @@ export default function Home() {
         <aside className="preview-note">
           <span className="status-dot" aria-hidden="true" />
           <p>
-            This wallet uses Sepolia testnet. Never enter a recovery phrase you
-            use for real funds.
+            Switch networks from the header. Testnet funds have no real value;
+            on mainnets you are moving real assets. Never enter a recovery
+            phrase you use for real funds.
           </p>
         </aside>
       </main>

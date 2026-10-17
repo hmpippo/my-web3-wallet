@@ -4,7 +4,7 @@ import {
   isAddress,
   type Address,
 } from "viem";
-import { publicClient } from "@/core/chain";
+import { getPublicClient } from "@/core/chain";
 import type { StoredWalletToken } from "@/core/storage";
 
 const erc20ReadAbi = [
@@ -47,20 +47,22 @@ export function normalizeTokenAddress(value: string): Address {
 
 export async function readTokenMetadata(
   address: Address,
+  chainId: number,
 ): Promise<Omit<StoredWalletToken, "hidden">> {
   try {
+    const client = getPublicClient(chainId);
     const [name, symbol, decimals] = await Promise.all([
-      publicClient.readContract({
+      client.readContract({
         address,
         abi: erc20ReadAbi,
         functionName: "name",
       }),
-      publicClient.readContract({
+      client.readContract({
         address,
         abi: erc20ReadAbi,
         functionName: "symbol",
       }),
-      publicClient.readContract({
+      client.readContract({
         address,
         abi: erc20ReadAbi,
         functionName: "decimals",
@@ -79,7 +81,7 @@ export async function readTokenMetadata(
       throw new Error("The contract returned invalid token metadata.");
     }
 
-    return { address, name: name.trim(), symbol: symbol.trim(), decimals };
+    return { chainId, address, name: name.trim(), symbol: symbol.trim(), decimals };
   } catch (error) {
     if (
       error instanceof Error &&
@@ -97,9 +99,10 @@ export async function readTokenMetadata(
 export async function getTokenBalance(
   token: Pick<StoredWalletToken, "address" | "decimals" | "symbol">,
   account: Address,
+  chainId: number,
 ): Promise<{ raw: bigint; formatted: string }> {
   try {
-    const raw = await publicClient.readContract({
+    const raw = await getPublicClient(chainId).readContract({
       address: token.address,
       abi: erc20ReadAbi,
       functionName: "balanceOf",

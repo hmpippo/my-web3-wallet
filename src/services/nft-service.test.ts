@@ -5,7 +5,7 @@ const { readContract } = vi.hoisted(() => ({
 }));
 
 vi.mock("@/core/chain", () => ({
-  publicClient: { readContract },
+  getPublicClient: () => ({ readContract }),
 }));
 
 import {
@@ -19,6 +19,7 @@ import {
 const CONTRACT = "0x0000000000000000000000000000000000000001";
 const OWNER = "0x60228AbA7961736d16C7b9Ed4D109c8749D4fb35";
 const OTHER_OWNER = "0x79eA449c3375eD1a9D7D99f8068209ea748C6d42";
+const SEPOLIA = 11155111;
 
 describe("NFT metadata service", () => {
   beforeEach(() => {
@@ -88,8 +89,9 @@ describe("NFT metadata service", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      readNftMetadata(normalizeNftAddress(CONTRACT), BigInt("9"), "ERC-721"),
+      readNftMetadata(normalizeNftAddress(CONTRACT), BigInt("9"), "ERC-721", SEPOLIA),
     ).resolves.toEqual({
+      chainId: SEPOLIA,
       address: CONTRACT,
       tokenId: "9",
       standard: "ERC-721",
@@ -107,7 +109,7 @@ describe("NFT metadata service", () => {
       )}`,
     );
     await expect(
-      readNftMetadata(normalizeNftAddress(CONTRACT), BigInt("3"), "ERC-721"),
+      readNftMetadata(normalizeNftAddress(CONTRACT), BigInt("3"), "ERC-721", SEPOLIA),
     ).resolves.toMatchObject({ name: "Utf8 NFT", imageUrl: null });
 
     readContract.mockResolvedValueOnce(
@@ -116,7 +118,7 @@ describe("NFT metadata service", () => {
       ).toString("base64")}`,
     );
     await expect(
-      readNftMetadata(normalizeNftAddress(CONTRACT), BigInt("4"), "ERC-721"),
+      readNftMetadata(normalizeNftAddress(CONTRACT), BigInt("4"), "ERC-721", SEPOLIA),
     ).rejects.toThrow("256 KiB");
   });
 
@@ -132,7 +134,7 @@ describe("NFT metadata service", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      readNftMetadata(normalizeNftAddress(CONTRACT), BigInt("1"), "ERC-1155"),
+      readNftMetadata(normalizeNftAddress(CONTRACT), BigInt("1"), "ERC-1155", SEPOLIA),
     ).resolves.toMatchObject({ name: "alice.eth", imageUrl: null });
     expect(fetchMock).toHaveBeenCalledWith(
       "https://ens-metadata-service.appspot.com/name/0x01",
@@ -152,7 +154,7 @@ describe("NFT metadata service", () => {
       ),
     );
     await expect(
-      readNftMetadata(normalizeNftAddress(CONTRACT), BigInt("1"), "ERC-721"),
+      readNftMetadata(normalizeNftAddress(CONTRACT), BigInt("1"), "ERC-721", SEPOLIA),
     ).resolves.toMatchObject({
       name: "Relative",
       imageUrl: "https://example.com/nft/art/1.png",
@@ -172,7 +174,7 @@ describe("NFT metadata service", () => {
       ),
     );
     await expect(
-      readNftMetadata(normalizeNftAddress(CONTRACT), BigInt("2"), "ERC-721"),
+      readNftMetadata(normalizeNftAddress(CONTRACT), BigInt("2"), "ERC-721", SEPOLIA),
     ).resolves.toMatchObject({ name: "No art", imageUrl: null });
   });
 
@@ -197,8 +199,10 @@ describe("NFT metadata service", () => {
         normalizeNftAddress(CONTRACT),
         BigInt("1"),
         "ERC-721",
+        SEPOLIA,
       ),
     ).resolves.toEqual({
+      chainId: SEPOLIA,
       address: CONTRACT,
       tokenId: "1",
       standard: "ERC-721",
@@ -228,6 +232,7 @@ describe("NFT metadata service", () => {
         normalizeNftAddress(CONTRACT),
         BigInt("42"),
         "ERC-1155",
+        SEPOLIA,
       ),
     ).resolves.toMatchObject({
       tokenId: "42",
@@ -252,7 +257,7 @@ describe("NFT metadata service", () => {
     vi.stubGlobal("fetch", fetchMock);
     readContract.mockResolvedValueOnce("http://example.com/metadata.json");
     await expect(
-      readNftMetadata(normalizeNftAddress(CONTRACT), BigInt("1"), "ERC-721"),
+      readNftMetadata(normalizeNftAddress(CONTRACT), BigInt("1"), "ERC-721", SEPOLIA),
     ).rejects.toThrow("HTTPS or ipfs");
     expect(fetchMock).not.toHaveBeenCalled();
 
@@ -263,7 +268,7 @@ describe("NFT metadata service", () => {
       }),
     );
     await expect(
-      readNftMetadata(normalizeNftAddress(CONTRACT), BigInt("1"), "ERC-721"),
+      readNftMetadata(normalizeNftAddress(CONTRACT), BigInt("1"), "ERC-721", SEPOLIA),
     ).rejects.toThrow("256 KiB");
   });
 
@@ -277,7 +282,7 @@ describe("NFT metadata service", () => {
     );
 
     await expect(
-      readNftMetadata(normalizeNftAddress(CONTRACT), BigInt("1"), "ERC-721"),
+      readNftMetadata(normalizeNftAddress(CONTRACT), BigInt("1"), "ERC-721", SEPOLIA),
     ).rejects.toThrow(/could not be loaded.*retry/i);
   });
 
@@ -292,7 +297,7 @@ describe("NFT metadata service", () => {
       ),
     );
     await expect(
-      readNftMetadata(normalizeNftAddress(CONTRACT), BigInt("7"), "ERC-721"),
+      readNftMetadata(normalizeNftAddress(CONTRACT), BigInt("7"), "ERC-721", SEPOLIA),
     ).resolves.toMatchObject({
       name: "ERC-721 #7",
     });
@@ -305,7 +310,7 @@ describe("NFT metadata service", () => {
       ),
     );
     await expect(
-      readNftMetadata(normalizeNftAddress(CONTRACT), BigInt("7"), "ERC-721"),
+      readNftMetadata(normalizeNftAddress(CONTRACT), BigInt("7"), "ERC-721", SEPOLIA),
     ).rejects.toThrow("not valid JSON");
   });
 });
@@ -324,6 +329,7 @@ describe("NFT ownership reads", () => {
         BigInt("1"),
         "ERC-721",
         OWNER,
+        SEPOLIA,
       ),
     ).resolves.toBe(true);
     expect(readContract).toHaveBeenCalledWith(
@@ -341,6 +347,7 @@ describe("NFT ownership reads", () => {
         BigInt("1"),
         "ERC-721",
         OWNER.toLowerCase() as `0x${string}`,
+        SEPOLIA,
       ),
     ).resolves.toBe(true);
   });
@@ -353,6 +360,7 @@ describe("NFT ownership reads", () => {
         BigInt("1"),
         "ERC-721",
         OWNER,
+        SEPOLIA,
       ),
     ).resolves.toBe(false);
   });
@@ -365,6 +373,7 @@ describe("NFT ownership reads", () => {
         BigInt("42"),
         "ERC-1155",
         OWNER,
+        SEPOLIA,
       ),
     ).resolves.toBe(false);
 
@@ -375,6 +384,7 @@ describe("NFT ownership reads", () => {
         BigInt("42"),
         "ERC-1155",
         OWNER,
+        SEPOLIA,
       ),
     ).resolves.toBe(true);
     expect(readContract).toHaveBeenLastCalledWith(
@@ -392,6 +402,7 @@ describe("NFT ownership reads", () => {
         BigInt("42"),
         "ERC-1155",
         OWNER,
+        SEPOLIA,
       ),
     ).resolves.toBe(true);
   });
@@ -404,6 +415,7 @@ describe("NFT ownership reads", () => {
         BigInt("1"),
         "ERC-721",
         OWNER,
+        SEPOLIA,
       ),
     ).rejects.toThrow("execution reverted");
 
@@ -414,6 +426,7 @@ describe("NFT ownership reads", () => {
         BigInt("1"),
         "ERC-721",
         OWNER,
+        SEPOLIA,
       ),
     ).rejects.toThrow("owner address");
 
@@ -424,6 +437,7 @@ describe("NFT ownership reads", () => {
         BigInt("1"),
         "ERC-1155",
         OWNER,
+        SEPOLIA,
       ),
     ).rejects.toThrow("ERC-1155 balance");
   });

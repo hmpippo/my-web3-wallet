@@ -7,11 +7,12 @@ import {
 } from "viem";
 import type { Address, Hex, Hash } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { CHAIN, publicClient } from "@/core/chain";
+import { getChain, getPublicClient, getRpcUrl } from "@/core/chain";
 
 export interface NativeTransfer {
   to: Address;
   value: bigint;
+  chainId: number;
   privateKey: Hex;
   gas?: bigint;
   gasPrice?: bigint;
@@ -30,6 +31,7 @@ export interface Erc20Transfer {
   token: Address;
   to: Address;
   amount: bigint;
+  chainId: number;
   privateKey: Hex;
   gas?: bigint;
   gasPrice?: bigint;
@@ -60,16 +62,18 @@ export async function estimateNativeTransfer(params: {
   from: Address;
   to: Address;
   value: bigint;
+  chainId: number;
 }): Promise<NativeTransferEstimate> {
-  const { from, value } = params;
+  const { from, value, chainId } = params;
   const to = validateRecipient(params.to);
   if (value <= BigInt(0)) {
     throw new RangeError("Transfer value must be greater than zero");
   }
 
+  const client = getPublicClient(chainId);
   const [gas, gasPrice] = await Promise.all([
-    publicClient.estimateGas({ account: from, to, value }),
-    publicClient.getGasPrice(),
+    client.estimateGas({ account: from, to, value }),
+    client.getGasPrice(),
   ]);
   return { gas, gasPrice, estimatedFee: gas * gasPrice };
 }
@@ -77,6 +81,7 @@ export async function estimateNativeTransfer(params: {
 export async function sendNativeTransfer({
   to,
   value,
+  chainId,
   privateKey,
   gas: reviewedGas,
   gasPrice: reviewedGasPrice,
@@ -94,12 +99,13 @@ export async function sendNativeTransfer({
           from: account.address,
           to: normalizedTo,
           value,
+          chainId,
         });
 
   const walletClient = createWalletClient({
     account,
-    chain: CHAIN,
-    transport: http(),
+    chain: getChain(chainId),
+    transport: http(getRpcUrl(chainId)),
   });
 
   return walletClient.sendTransaction({
@@ -116,8 +122,9 @@ export async function estimateErc20Transfer(params: {
   token: Address;
   to: Address;
   amount: bigint;
+  chainId: number;
 }): Promise<Erc20TransferEstimate> {
-  const { from, amount } = params;
+  const { from, amount, chainId } = params;
   const token = validateToken(params.token);
   const to = validateRecipient(params.to);
   if (amount <= BigInt(0)) {
@@ -125,9 +132,10 @@ export async function estimateErc20Transfer(params: {
   }
 
   const data = encodeErc20Transfer(to, amount);
+  const client = getPublicClient(chainId);
   const [gas, gasPrice] = await Promise.all([
-    publicClient.estimateGas({ account: from, to: token, data }),
-    publicClient.getGasPrice(),
+    client.estimateGas({ account: from, to: token, data }),
+    client.getGasPrice(),
   ]);
   return { gas, gasPrice, estimatedFee: gas * gasPrice };
 }
@@ -136,6 +144,7 @@ export async function sendErc20Transfer({
   token,
   to,
   amount,
+  chainId,
   privateKey,
   gas: reviewedGas,
   gasPrice: reviewedGasPrice,
@@ -156,12 +165,13 @@ export async function sendErc20Transfer({
           token: normalizedToken,
           to: normalizedTo,
           amount,
+          chainId,
         });
 
   const walletClient = createWalletClient({
     account,
-    chain: CHAIN,
-    transport: http(),
+    chain: getChain(chainId),
+    transport: http(getRpcUrl(chainId)),
   });
 
   return walletClient.sendTransaction({
