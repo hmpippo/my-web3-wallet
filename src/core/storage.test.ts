@@ -224,6 +224,28 @@ describe("vault storage", () => {
     ).rejects.toThrow("invalid NFT");
   });
 
+  it("stores inline data: image links for on-chain NFTs", async () => {
+    const localStorage = createLocalStorageMock();
+    vi.stubGlobal("window", { localStorage });
+    const first = testAccountMetadata.accounts[1]!;
+    const nft = first.nfts![0]!;
+    const imageUrl = `data:image/svg+xml;base64,${Buffer.from(
+      "<svg></svg>",
+    ).toString("base64")}`;
+
+    await storageService.saveAccountMetadata({
+      ...testAccountMetadata,
+      accounts: [
+        testAccountMetadata.accounts[0]!,
+        { ...first, nfts: [{ ...nft, imageUrl }] },
+      ],
+    });
+
+    await expect(storageService.loadAccountMetadata()).resolves.toMatchObject({
+      accounts: [{ nfts: [] }, { nfts: [{ imageUrl }] }],
+    });
+  });
+
   it("loads legacy account records without token or NFT lists as empty lists", async () => {
     const localStorage = createLocalStorageMock();
     vi.stubGlobal("window", { localStorage });

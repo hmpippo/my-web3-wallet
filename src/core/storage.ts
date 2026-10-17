@@ -1,5 +1,6 @@
 import type { EncryptedVault } from "./crypto";
 import { accountDerivationPath } from "./hd-wallet";
+import { isSafeImageUri, MAX_IMAGE_URL_LENGTH } from "./url-safety";
 import { getAddress } from "viem";
 
 export const VAULT_STORAGE_KEY = "wallet_vault_v1";
@@ -271,8 +272,8 @@ function parseStoredNfts(value: unknown): StoredWalletNft[] {
       candidate.description.length > 4000 ||
       (candidate.imageUrl !== null &&
         (typeof candidate.imageUrl !== "string" ||
-          candidate.imageUrl.length > 2048 ||
-          !isSafeStoredImageUrl(candidate.imageUrl)))
+          candidate.imageUrl.length > MAX_IMAGE_URL_LENGTH ||
+          !isSafeImageUri(candidate.imageUrl)))
     ) {
       throw new Error("Stored account metadata contains an invalid NFT");
     }
@@ -296,39 +297,6 @@ function parseStoredNfts(value: unknown): StoredWalletNft[] {
     throw new Error("Stored account metadata contains duplicate NFTs");
   }
   return nfts;
-}
-
-function isSafeStoredImageUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    return (
-      url.protocol === "https:" &&
-      !url.username &&
-      !url.password &&
-      !isLocalHostname(url.hostname)
-    );
-  } catch {
-    return false;
-  }
-}
-
-function isLocalHostname(hostname: string): boolean {
-  const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  return (
-    normalized === "localhost" ||
-    normalized.endsWith(".localhost") ||
-    normalized.endsWith(".local") ||
-    normalized.endsWith(".internal") ||
-    normalized.endsWith(".home.arpa") ||
-    normalized === "::1" ||
-    normalized.includes(":") ||
-    normalized === "0.0.0.0" ||
-    /^127\./.test(normalized) ||
-    /^10\./.test(normalized) ||
-    /^192\.168\./.test(normalized) ||
-    /^169\.254\./.test(normalized) ||
-    /^172\.(1[6-9]|2\d|3[01])\./.test(normalized)
-  );
 }
 
 function parseStoredTokens(value: unknown): StoredWalletToken[] {

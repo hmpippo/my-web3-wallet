@@ -62,14 +62,18 @@ user are shown.
 
 The NFTs tab lets the user add a contract, token ID, and ERC-721/ERC-1155
 standard to the selected account's local list. The wallet reads `tokenURI` or
-`uri` from Sepolia and loads the returned HTTPS/IPFS metadata (IPFS is resolved
-through `https://ipfs.io`). Metadata and image links are untrusted public
-content; only HTTPS is used, metadata responses are capped at 256 KiB, and
-descriptions are rendered as text. NFT records are public display metadata
-stored per account, not proof of ownership; the wallet does not verify holdings
-or automatically discover NFTs. Removing an entry only removes it from the
-local list and has no on-chain effect. Metadata fetch, CORS, or gateway errors
-are surfaced so the user can retry.
+`uri` from Sepolia and loads the returned metadata: inline `data:` JSON is
+decoded in place, `ipfs://` is resolved through `https://ipfs.io`, `ar://`
+through `https://arweave.net`, and HTTPS URLs (including scheme-less `host/path`
+values that some contracts return) are fetched directly. Metadata and image
+links are untrusted public content; only public HTTPS and inline images are
+used, loopback/private hosts are refused, metadata responses are capped at
+256 KiB, and descriptions are rendered as text. A broken or oversized `image`
+field only drops the picture, never the NFT entry. NFT records are public
+display metadata stored per account, not proof of ownership; the wallet does
+not verify holdings or automatically discover NFTs. Removing an entry only
+removes it from the local list and has no on-chain effect. Metadata fetch,
+CORS, or gateway errors are surfaced so the user can retry.
 
 ## Transaction history
 
