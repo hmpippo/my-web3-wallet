@@ -16,8 +16,21 @@ const testVault: EncryptedVault = {
 const testAccountMetadata: WalletAccountMetadata = {
   version: 1,
   accounts: [
-    { path: "m/44'/60'/0'/0/0", name: "Account 1", hidden: false },
-    { path: "m/44'/60'/0'/0/2", name: "Savings", hidden: false },
+    { path: "m/44'/60'/0'/0/0", name: "Account 1", hidden: false, tokens: [] },
+    {
+      path: "m/44'/60'/0'/0/2",
+      name: "Savings",
+      hidden: false,
+      tokens: [
+        {
+          address: "0x0000000000000000000000000000000000000001",
+          name: "Test Token",
+          symbol: "TST",
+          decimals: 6,
+          hidden: false,
+        },
+      ],
+    },
   ],
   selectedPath: "m/44'/60'/0'/0/2",
 };
@@ -128,6 +141,55 @@ describe("vault storage", () => {
     await expect(storageService.loadAccountMetadata()).rejects.toThrow(
       "invalid or duplicate accounts",
     );
+  });
+
+  it("rejects duplicate or invalid token metadata", async () => {
+    const localStorage = createLocalStorageMock();
+    vi.stubGlobal("window", { localStorage });
+    const first = testAccountMetadata.accounts[1]!;
+    const token = first.tokens![0]!;
+
+    await expect(
+      storageService.saveAccountMetadata({
+        ...testAccountMetadata,
+        accounts: [
+          testAccountMetadata.accounts[0]!,
+          { ...first, tokens: [token, token] },
+        ],
+      }),
+    ).rejects.toThrow("duplicate tokens");
+
+    await expect(
+      storageService.saveAccountMetadata({
+        ...testAccountMetadata,
+        accounts: [
+          testAccountMetadata.accounts[0]!,
+          {
+            ...first,
+            tokens: [{ ...token, decimals: 256 }],
+          },
+        ],
+      }),
+    ).rejects.toThrow("invalid token");
+  });
+
+  it("loads legacy account records without token lists as empty lists", async () => {
+    const localStorage = createLocalStorageMock();
+    vi.stubGlobal("window", { localStorage });
+    localStorage.setItem(
+      ACCOUNT_METADATA_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        accounts: [
+          { path: "m/44'/60'/0'/0/0", name: "Account 1", hidden: false },
+        ],
+        selectedPath: "m/44'/60'/0'/0/0",
+      }),
+    );
+
+    await expect(storageService.loadAccountMetadata()).resolves.toMatchObject({
+      accounts: [{ tokens: [] }],
+    });
   });
 
   it("surfaces invalid stored JSON and invalid vault shapes", async () => {

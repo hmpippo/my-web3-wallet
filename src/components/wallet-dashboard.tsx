@@ -13,6 +13,7 @@ import {
 import { getNativeBalance } from "@/services/balance-service";
 import { walletService } from "@/services/wallet-service";
 import { TransactionHistory } from "@/components/transaction-history";
+import { TokenPortfolio } from "@/components/token-portfolio";
 
 export function WalletDashboard() {
   const router = useRouter();
@@ -38,7 +39,13 @@ export function WalletDashboard() {
   );
   const [draftAccountName, setDraftAccountName] = useState("");
   const [isSavingAccount, setIsSavingAccount] = useState(false);
+  const [activePortfolioTab, setActivePortfolioTab] = useState<
+    "tokens" | "activity"
+  >("tokens");
   const visibleAccounts = walletState.accounts.filter((account) => !account.hidden);
+  const selectedAccount = walletState.accounts.find(
+    (account) => account.index === walletState.selectedAccountIndex,
+  );
 
   const balance =
     address && balanceResult?.address === address ? balanceResult.value : null;
@@ -324,7 +331,52 @@ export function WalletDashboard() {
           </Link>
         </div>
       </section>
-      {address ? <TransactionHistory key={address} address={address} /> : null}
+      <div className="portfolio-tabs" role="tablist" aria-label="Wallet overview">
+        <button
+          aria-controls="portfolio-tokens"
+          aria-selected={activePortfolioTab === "tokens"}
+          className="portfolio-tab"
+          id="portfolio-tokens-tab"
+          onClick={() => setActivePortfolioTab("tokens")}
+          role="tab"
+          type="button"
+        >
+          Tokens
+        </button>
+        <button
+          aria-controls="portfolio-activity"
+          aria-selected={activePortfolioTab === "activity"}
+          className="portfolio-tab"
+          id="portfolio-activity-tab"
+          onClick={() => setActivePortfolioTab("activity")}
+          role="tab"
+          type="button"
+        >
+          Activity
+        </button>
+      </div>
+      {activePortfolioTab === "tokens" && address && selectedAccount ? (
+        <div
+          aria-labelledby="portfolio-tokens-tab"
+          id="portfolio-tokens"
+          role="tabpanel"
+        >
+          <TokenPortfolio
+            accountAddress={address}
+            key={selectedAccount.path}
+            tokens={selectedAccount.tokens}
+          />
+        </div>
+      ) : null}
+      {activePortfolioTab === "activity" && address ? (
+        <div
+          aria-labelledby="portfolio-activity-tab"
+          id="portfolio-activity"
+          role="tabpanel"
+        >
+          <TransactionHistory key={address} address={address} />
+        </div>
+      ) : null}
     </main>
   );
 }

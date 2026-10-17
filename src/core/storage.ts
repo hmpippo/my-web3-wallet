@@ -1,5 +1,6 @@
 import type { EncryptedVault } from "./crypto";
 import { accountDerivationPath } from "./hd-wallet";
+import { getAddress } from "viem";
 
 export const VAULT_STORAGE_KEY = "wallet_vault_v1";
 export const ACCOUNT_METADATA_STORAGE_KEY = "wallet_accounts_v1";
@@ -7,6 +8,15 @@ export const ACCOUNT_METADATA_STORAGE_KEY = "wallet_accounts_v1";
 export interface StoredWalletAccount {
   readonly path: string;
   readonly name: string;
+  readonly hidden: boolean;
+  readonly tokens?: readonly StoredWalletToken[];
+}
+
+export interface StoredWalletToken {
+  readonly address: `0x${string}`;
+  readonly name: string;
+  readonly symbol: string;
+  readonly decimals: number;
   readonly hidden: boolean;
 }
 
@@ -188,7 +198,68 @@ function parseStoredAccount(value: unknown): StoredWalletAccount {
     path: accountDerivationPath(index),
     name: candidate.name.trim(),
     hidden: candidate.hidden,
+    tokens:
+      candidate.tokens === undefined
+        ? []
+        : parseStoredTokens(candidate.tokens),
   };
+}
+
+function parseStoredTokens(value: unknown): StoredWalletToken[] {
+  if (!Array.isArray(value)) {
+    throw new Error("Stored account metadata contains an invalid token list");
+  }
+
+  const tokens = value.map((token): StoredWalletToken => {
+    if (
+      typeof token !== "object" ||
+      token === null ||
+      !("address" in token) ||
+      !("name" in token) ||
+      !("symbol" in token) ||
+      !("decimals" in token) ||
+      !("hidden" in token)
+    ) {
+      throw new Error("Stored account metadata contains an invalid token");
+    }
+    const candidate = token as Record<string, unknown>;
+    let address: `0x${string}` | null = null;
+    if (
+      typeof candidate.address === "string" &&
+      /^0x[0-9a-fA-F]{40}$/.test(candidate.address)
+    ) {
+      address = getAddress(candidate.address.toLowerCase());
+    }
+    if (
+      address === null ||
+      typeof candidate.name !== "string" ||
+      candidate.name.trim().length === 0 ||
+      candidate.name.length > 128 ||
+      typeof candidate.symbol !== "string" ||
+      candidate.symbol.trim().length === 0 ||
+      candidate.symbol.length > 32 ||
+      typeof candidate.decimals !== "number" ||
+      !Number.isInteger(candidate.decimals) ||
+      candidate.decimals < 0 ||
+      candidate.decimals > 255 ||
+      typeof candidate.hidden !== "boolean"
+    ) {
+      throw new Error("Stored account metadata contains an invalid token");
+    }
+    return {
+      address,
+      name: candidate.name.trim(),
+      symbol: candidate.symbol.trim(),
+      decimals: candidate.decimals,
+      hidden: candidate.hidden,
+    };
+  });
+
+  const addresses = new Set(tokens.map((token) => token.address));
+  if (addresses.size !== tokens.length) {
+    throw new Error("Stored account metadata contains duplicate tokens");
+  }
+  return tokens;
 }
 
 function accountIndex(path: string): number | null {

@@ -26,6 +26,7 @@ Open [http://localhost:3000](http://localhost:3000) to view the app.
 - `src/services/wallet-service.ts` — create, import, unlock, lock, and send lifecycle
 - `src/services/transaction-service.ts` — estimated-gas native transfers with viem
 - `src/services/balance-service.ts` — native Sepolia balance reads
+- `src/services/token-service.ts` — ERC-20 metadata and balance reads from Sepolia RPC
 - `src/services/etherscan-history.ts` — server-only Etherscan V2 activity adapter
 - `src/app/api/transactions/route.ts` — validated same-origin history endpoint
 - `src/store/`, `src/types/`, `src/lib/` — reserved for follow-up state and shared utilities
@@ -48,6 +49,15 @@ private key is stored there. Locking clears derived keys from memory; after
 unlocking, the wallet restores the saved accounts and selected visible account.
 Accounts can be hidden and restored without deleting them or their funds, and
 new accounts always use the next unused derivation index.
+
+The wallet overview includes a Tokens tab for manually added Sepolia ERC-20
+contracts. Token name, symbol, decimals, and the selected account's current
+balance are read directly from the contract through the configured RPC.
+Contract metadata and hidden/visible state are stored per account; balances are
+refreshed from chain and are never persisted. Zero-balance tokens remain listed.
+Hide a token to remove it from the portfolio list, then restore it from token
+management. This is not automatic token discovery: only contracts added by the
+user are shown.
 
 ## Transaction history
 

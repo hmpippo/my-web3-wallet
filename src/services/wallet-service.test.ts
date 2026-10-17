@@ -77,6 +77,7 @@ describe("WalletService", () => {
           name: "Account 1",
           address: prepared.address,
           hidden: false,
+          tokens: [],
         },
       ],
       selectedAccountIndex: 0,
@@ -148,6 +149,7 @@ describe("WalletService", () => {
           name: "Account 1",
           address: EXPECTED_ADDRESS,
           hidden: false,
+          tokens: [],
         },
       ],
       selectedAccountIndex: 0,
@@ -269,6 +271,7 @@ describe("WalletService", () => {
       name: "Account 2",
       address: SECOND_ADDRESS,
       hidden: false,
+      tokens: [],
     });
     expect(service.getState()).toEqual({
       isUnlocked: true,
@@ -280,6 +283,7 @@ describe("WalletService", () => {
           name: "Account 1",
           address: EXPECTED_ADDRESS,
           hidden: false,
+          tokens: [],
         },
         second,
       ],
@@ -305,6 +309,7 @@ describe("WalletService", () => {
           name: "Account 1",
           address: EXPECTED_ADDRESS,
           hidden: false,
+          tokens: [],
         },
         {
           index: 1,
@@ -312,6 +317,7 @@ describe("WalletService", () => {
           name: "Account 2",
           address: SECOND_ADDRESS,
           hidden: false,
+          tokens: [],
         },
       ],
       selectedAccountIndex: 1,
@@ -418,6 +424,7 @@ describe("WalletService", () => {
         path: "m/44'/60'/0'/0/0",
         name: "Account 1",
         hidden: false,
+        tokens: [],
       },
     ]);
   });
@@ -439,6 +446,80 @@ describe("WalletService", () => {
 
     expect(service.getState().selectedAccountIndex).toBe(0);
     expect(getAccountMetadata()?.selectedPath).toBe("m/44'/60'/0'/0/0");
+  });
+
+  it("manages tokens per selected account and persists hidden entries", async () => {
+    const { storage, getAccountMetadata } = createStorage();
+    const readMetadata = vi.fn(async (address: `0x${string}`) => ({
+      address,
+      name: "Test Token",
+      symbol: "TST",
+      decimals: 18,
+    }));
+    const service = new WalletService({
+      storage,
+      readTokenMetadata: readMetadata,
+    });
+    await service.importWallet(TEST_MNEMONIC, "correct horse");
+    await service.addAccount();
+
+    const token = await service.addToken(
+      "0x0000000000000000000000000000000000000001",
+    );
+    expect(token).toMatchObject({ symbol: "TST", hidden: false });
+    await expect(
+      service.addToken("0x0000000000000000000000000000000000000001"),
+    ).rejects.toThrow("already in the selected account");
+
+    await service.selectAccount(0);
+    expect(service.getState().accounts[0]?.tokens).toEqual([]);
+    await expect(
+      service.addToken("0x0000000000000000000000000000000000000001"),
+    ).resolves.toMatchObject({ symbol: "TST" });
+    await service.hideToken(token.address);
+    expect(service.getState().accounts[0]?.tokens[0]?.hidden).toBe(true);
+    await service.restoreToken(token.address);
+    expect(service.getState().accounts[0]?.tokens[0]?.hidden).toBe(false);
+
+    expect(getAccountMetadata()?.accounts.map((account) => account.tokens)).toEqual([
+      [
+        {
+          address: "0x0000000000000000000000000000000000000001",
+          name: "Test Token",
+          symbol: "TST",
+          decimals: 18,
+          hidden: false,
+        },
+      ],
+      [
+        {
+          address: "0x0000000000000000000000000000000000000001",
+          name: "Test Token",
+          symbol: "TST",
+          decimals: 18,
+          hidden: false,
+        },
+      ],
+    ]);
+    expect(readMetadata).toHaveBeenCalledTimes(2);
+  });
+
+  it("rejects invalid token addresses and retains metadata when contract reads fail", async () => {
+    const service = new WalletService({
+      storage: createStorage().storage,
+      readTokenMetadata: vi.fn(async () => {
+        throw new Error("Could not read ERC-20 metadata");
+      }),
+    });
+    await service.importWallet(TEST_MNEMONIC, "correct horse");
+
+    await expect(service.addToken("invalid")).rejects.toThrow(
+      "valid ERC-20 contract address",
+    );
+    await expect(
+      service.addToken("0x0000000000000000000000000000000000000001"),
+    ).rejects.toThrow("Could not read ERC-20 metadata");
+    expect(service.getState().accounts[0]?.tokens).toEqual([]);
   });
 
   it("rejects account operations while locked or for an unknown index", async () => {

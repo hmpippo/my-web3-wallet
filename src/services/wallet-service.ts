@@ -14,10 +14,15 @@ import {
 } from "@/core/hd-wallet";
 import {
   storageService,
+  type StoredWalletToken,
   type StorageService,
   type WalletAccountMetadata,
 } from "@/core/storage";
 import { sendNativeTransfer } from "./transaction-service";
+import {
+  normalizeTokenAddress,
+  readTokenMetadata,
+} from "./token-service";
 
 export interface WalletState {
   readonly isUnlocked: boolean;
@@ -32,6 +37,7 @@ export interface WalletAccount {
   readonly name: string;
   readonly address: Address;
   readonly hidden: boolean;
+  readonly tokens: readonly StoredWalletToken[];
 }
 
 export interface PreparedWallet {
@@ -41,6 +47,9 @@ export interface PreparedWallet {
 
 export interface WalletServiceDependencies {
   storage?: StorageService;
+  readTokenMetadata?: (
+    address: Address,
+  ) => Promise<Omit<StoredWalletToken, "hidden">>;
   sendTransfer?: (params: {
     to: Address;
     value: bigint;
@@ -75,10 +84,14 @@ export class WalletService {
   private readonly sendTransfer: NonNullable<
     WalletServiceDependencies["sendTransfer"]
   >;
+  private readonly readTokenMetadata: NonNullable<
+    WalletServiceDependencies["readTokenMetadata"]
+  >;
 
   constructor(dependencies: WalletServiceDependencies = {}) {
     this.storage = dependencies.storage ?? storageService;
     this.sendTransfer = dependencies.sendTransfer ?? sendNativeTransfer;
+    this.readTokenMetadata = dependencies.readTokenMetadata ?? readTokenMetadata;
   }
 
   get isUnlocked(): boolean {
@@ -261,6 +274,7 @@ export class WalletService {
           name: storedAccount.name,
           address: derived.address,
           hidden: storedAccount.hidden,
+          tokens: storedAccount.tokens ?? [],
         };
         accounts.push(walletAccount);
         if (storedAccount.path === selectedPath) {
@@ -430,6 +444,97 @@ export class WalletService {
     }
   }
 
+  async addToken(address: string): Promise<StoredWalletToken> {
+    if (!this.state.isUnlocked) throw new Error("Wallet is locked");
+    const selectedIndex = this.state.selectedAccountIndex;
+    const account = this.state.accounts.find(
+      (candidate) => candidate.index === selectedIndex,
+    );
+    if (!account) throw new Error("Wallet is locked");
+    const normalizedAddress = normalizeTokenAddress(address);
+    if (
+      account.tokens.some(
+        (token) =>
+          token.address.toLowerCase() === normalizedAddress.toLowerCase(),
+      )
+    ) {
+      throw new Error("This token is already in the selected account.");
+    }
+    const mutationVersion = this.beginAccountMutation();
+    const operationVersion = this.operationVersion;
+    try {
+      const metadata = await this.readTokenMetadata(normalizedAddress);
+      this.assertOperationCurrent(operationVersion);
+      if (
+        account.tokens.some(
+          (token) =>
+            token.address.toLowerCase() === metadata.address.toLowerCase(),
+        )
+      ) {
+        throw new Error("This token is already in the selected account.");
+      }
+      const token: StoredWalletToken = { ...metadata, hidden: false };
+      const accounts = this.state.accounts.map((candidate) =>
+        candidate.index === selectedIndex
+          ? { ...candidate, tokens: [...candidate.tokens, token] }
+          : candidate,
+      );
+      await this.persistAccounts(accounts, selectedIndex);
+      this.assertOperationCurrent(operationVersion);
+      this.updateState(true, accounts, selectedIndex);
+      return token;
+    } finally {
+      this.finishAccountMutation(mutationVersion);
+    }
+  }
+
+  async hideToken(address: Address): Promise<void> {
+    await this.setTokenVisibility(address, true);
+  }
+
+  async restoreToken(address: Address): Promise<void> {
+    await this.setTokenVisibility(address, false);
+  }
+
+  private async setTokenVisibility(
+    address: Address,
+    hidden: boolean,
+  ): Promise<void> {
+    if (!this.state.isUnlocked) throw new Error("Wallet is locked");
+    const selectedIndex = this.state.selectedAccountIndex;
+    const selected = this.state.accounts.find(
+      (candidate) => candidate.index === selectedIndex,
+    );
+    if (!selected) throw new Error("Wallet is locked");
+    const target = selected.tokens.find(
+      (token) => token.address.toLowerCase() === address.toLowerCase(),
+    );
+    if (!target) throw new RangeError("Token does not exist in this account");
+    if (target.hidden === hidden) return;
+
+    const mutationVersion = this.beginAccountMutation();
+    const operationVersion = this.operationVersion;
+    try {
+      const accounts = this.state.accounts.map((candidate) =>
+        candidate.index === selectedIndex
+          ? {
+              ...candidate,
+              tokens: candidate.tokens.map((token) =>
+                token.address.toLowerCase() === address.toLowerCase()
+                  ? { ...token, hidden }
+                  : token,
+              ),
+            }
+          : candidate,
+      );
+      await this.persistAccounts(accounts, selectedIndex);
+      this.assertOperationCurrent(operationVersion);
+      this.updateState(true, accounts, selectedIndex);
+    } finally {
+      this.finishAccountMutation(mutationVersion);
+    }
+  }
+
   async signAndSendTransaction(tx: {
     from: Address;
     to: Address;
@@ -493,7 +598,12 @@ export class WalletService {
     if (!selected) throw new Error("Select a visible account before saving");
     await this.storage.saveAccountMetadata({
       version: 1,
-      accounts: accounts.map(({ path, name, hidden }) => ({ path, name, hidden })),
+      accounts: accounts.map(({ path, name, hidden, tokens }) => ({
+        path,
+        name,
+        hidden,
+        tokens,
+      })),
       selectedPath: selected.path,
     });
   }
@@ -533,13 +643,22 @@ export class WalletService {
           account.path === accounts[index]?.path &&
           account.name === accounts[index]?.name &&
           account.address === accounts[index]?.address &&
-          account.hidden === accounts[index]?.hidden,
+          account.hidden === accounts[index]?.hidden &&
+          JSON.stringify(account.tokens) ===
+            JSON.stringify(accounts[index]?.tokens),
       )
     ) {
       return;
     }
     const frozenAccounts = Object.freeze(
-      accounts.map((account) => Object.freeze({ ...account })),
+      accounts.map((account) =>
+        Object.freeze({
+          ...account,
+          tokens: Object.freeze(
+            account.tokens.map((token) => Object.freeze({ ...token })),
+          ),
+        }),
+      ),
     );
     this.state = Object.freeze({
       isUnlocked,
@@ -568,6 +687,7 @@ function createWalletAccount(index: number, address: Address): WalletAccount {
     name: `Account ${index + 1}`,
     address,
     hidden: false,
+    tokens: [],
   };
 }
 
@@ -575,7 +695,7 @@ function createDefaultMetadata(): WalletAccountMetadata {
   const path = accountDerivationPath(0);
   return {
     version: 1,
-    accounts: [{ path, name: "Account 1", hidden: false }],
+    accounts: [{ path, name: "Account 1", hidden: false, tokens: [] }],
     selectedPath: path,
   };
 }
