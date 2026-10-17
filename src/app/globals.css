@@ -775,10 +775,63 @@ input {
   font-size: 1rem;
 }
 
-.receive-note {
-  margin: 0.85rem 0 0;
-  color: var(--muted);
+.receive-card {
+  max-width: 30rem;
+  text-align: center;
+}
+
+.receive-intro {
+  margin-top: 0.6rem;
+}
+
+.receive-qr {
+  display: block;
+  width: 15rem;
+  max-width: 100%;
+  margin: 1.5rem auto 0;
+  /*
+    White panel whose padding is the QR quiet zone. No border or shadow: the
+    surrounding card is white too, so the blank margin runs on uninterrupted
+    instead of ending in a visible line a scanner could read as data.
+  */
+  border-radius: 1rem;
+  background: #ffffff;
+  padding: 1rem;
+}
+
+.receive-qr svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.receive-address-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: var(--background);
+  margin-top: 1.25rem;
+  padding: 0.7rem 0.85rem;
+}
+
+.receive-address-row code {
+  min-width: 0;
+  /*
+    0.85rem is the largest size at which the 42-character address still fits on
+    a single line inside this card, which keeps it easy to compare against a
+    scanned address. Narrow screens wrap it instead of scrolling it out of view.
+  */
+  overflow-wrap: anywhere;
   font-size: 0.85rem;
+  text-align: left;
+}
+
+.receive-verify {
+  margin-top: 0.85rem;
+  text-align: left;
 }
 
 .portfolio-tabs {

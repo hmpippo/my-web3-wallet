@@ -26,7 +26,6 @@ export function WalletDashboard() {
   );
   const address = walletState.address;
   const [accountError, setAccountError] = useState<string | null>(null);
-  const [showReceiveNote, setShowReceiveNote] = useState(false);
   // Allows a deep link such as /wallet?tab=nfts to open on a specific tab.
   const [activePortfolioTab, setActivePortfolioTab] = useState<
     "tokens" | "nfts" | "activity"
@@ -132,20 +131,10 @@ export function WalletDashboard() {
           <Link className="button button-primary" href="/send">
             Send
           </Link>
-          <button
-            aria-expanded={showReceiveNote}
-            className="button button-outline"
-            onClick={() => setShowReceiveNote((open) => !open)}
-            type="button"
-          >
+          <Link className="button button-outline" href="/receive">
             Receive
-          </button>
+          </Link>
         </div>
-        {showReceiveNote ? (
-          <p className="receive-note" role="status">
-            Receive is coming soon.
-          </p>
-        ) : null}
       </section>
       <div className="portfolio-tabs" role="tablist" aria-label="Wallet overview">
         <button
