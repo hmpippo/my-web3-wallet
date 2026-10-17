@@ -27,6 +27,7 @@ Open [http://localhost:3000](http://localhost:3000) to view the app.
 - `src/services/transaction-service.ts` — estimated-gas native transfers with viem
 - `src/services/balance-service.ts` — native Sepolia balance reads
 - `src/services/token-service.ts` — ERC-20 metadata and balance reads from Sepolia RPC
+- `src/services/nft-service.ts` — ERC-721/ERC-1155 metadata URI and public metadata reads
 - `src/services/etherscan-history.ts` — server-only Etherscan V2 activity adapter
 - `src/app/api/transactions/route.ts` — validated same-origin history endpoint
 - `src/store/`, `src/types/`, `src/lib/` — reserved for follow-up state and shared utilities
@@ -59,6 +60,17 @@ Hide a token to remove it from the portfolio list, then restore it from token
 management. This is not automatic token discovery: only contracts added by the
 user are shown.
 
+The NFTs tab lets the user add a contract, token ID, and ERC-721/ERC-1155
+standard to the selected account's local list. The wallet reads `tokenURI` or
+`uri` from Sepolia and loads the returned HTTPS/IPFS metadata (IPFS is resolved
+through `https://ipfs.io`). Metadata and image links are untrusted public
+content; only HTTPS is used, metadata responses are capped at 256 KiB, and
+descriptions are rendered as text. NFT records are public display metadata
+stored per account, not proof of ownership; the wallet does not verify holdings
+or automatically discover NFTs. Removing an entry only removes it from the
+local list and has no on-chain effect. Metadata fetch, CORS, or gateway errors
+are surfaced so the user can retry.
+
 ## Transaction history
 
 The wallet dashboard has separate tabs for normal ETH transactions, internal
@@ -79,7 +91,8 @@ export.
 The free Etherscan tier lists Sepolia as supported and allows up to 3 API calls
 per second and 100,000 calls per day. A history page requests one page from its
 selected activity source; provider limits or outages are shown as retryable
-errors.
+errors. NFT transaction history, token holdings, and automatic asset discovery
+are not included.
 If the server cannot reach Etherscan directly, enable Node's environment proxy
 support when starting the dev server, for example:
 

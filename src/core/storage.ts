@@ -10,6 +10,7 @@ export interface StoredWalletAccount {
   readonly name: string;
   readonly hidden: boolean;
   readonly tokens?: readonly StoredWalletToken[];
+  readonly nfts?: readonly StoredWalletNft[];
 }
 
 export interface StoredWalletToken {
@@ -18,6 +19,17 @@ export interface StoredWalletToken {
   readonly symbol: string;
   readonly decimals: number;
   readonly hidden: boolean;
+}
+
+export type NftStandard = "ERC-721" | "ERC-1155";
+
+export interface StoredWalletNft {
+  readonly address: `0x${string}`;
+  readonly tokenId: string;
+  readonly standard: NftStandard;
+  readonly name: string;
+  readonly description: string;
+  readonly imageUrl: string | null;
 }
 
 export interface WalletAccountMetadata {
@@ -202,7 +214,121 @@ function parseStoredAccount(value: unknown): StoredWalletAccount {
       candidate.tokens === undefined
         ? []
         : parseStoredTokens(candidate.tokens),
+    nfts:
+      candidate.nfts === undefined ? [] : parseStoredNfts(candidate.nfts),
   };
+}
+
+function parseStoredNfts(value: unknown): StoredWalletNft[] {
+  if (!Array.isArray(value)) {
+    throw new Error("Stored account metadata contains an invalid NFT list");
+  }
+
+  const nfts = value.map((nft): StoredWalletNft => {
+    if (
+      typeof nft !== "object" ||
+      nft === null ||
+      !("address" in nft) ||
+      !("tokenId" in nft) ||
+      !("standard" in nft) ||
+      !("name" in nft) ||
+      !("description" in nft) ||
+      !("imageUrl" in nft)
+    ) {
+      throw new Error("Stored account metadata contains an invalid NFT");
+    }
+    const candidate = nft as Record<string, unknown>;
+    let address: `0x${string}` | null = null;
+    if (
+      typeof candidate.address === "string" &&
+      /^0x[0-9a-fA-F]{40}$/.test(candidate.address)
+    ) {
+      address = getAddress(candidate.address.toLowerCase());
+    }
+    let tokenId: bigint | null = null;
+    if (
+      typeof candidate.tokenId === "string" &&
+      candidate.tokenId.length <= 78 &&
+      /^(0|[1-9]\d*)$/.test(candidate.tokenId)
+    ) {
+      try {
+        tokenId = BigInt(candidate.tokenId);
+      } catch {
+        tokenId = null;
+      }
+    }
+    if (
+      address === null ||
+      tokenId === null ||
+      tokenId > (BigInt("1") << BigInt("256")) - BigInt("1") ||
+      typeof candidate.standard !== "string" ||
+      (candidate.standard !== "ERC-721" &&
+        candidate.standard !== "ERC-1155") ||
+      typeof candidate.name !== "string" ||
+      candidate.name.trim().length === 0 ||
+      candidate.name.length > 128 ||
+      typeof candidate.description !== "string" ||
+      candidate.description.length > 4000 ||
+      (candidate.imageUrl !== null &&
+        (typeof candidate.imageUrl !== "string" ||
+          candidate.imageUrl.length > 2048 ||
+          !isSafeStoredImageUrl(candidate.imageUrl)))
+    ) {
+      throw new Error("Stored account metadata contains an invalid NFT");
+    }
+    return {
+      address,
+      tokenId: tokenId.toString(),
+      standard: candidate.standard,
+      name: candidate.name.trim(),
+      description: candidate.description,
+      imageUrl:
+        typeof candidate.imageUrl === "string" ? candidate.imageUrl : null,
+    };
+  });
+  const keys = new Set(
+    nfts.map(
+      (nft) =>
+        `${nft.address.toLowerCase()}:${nft.tokenId}:${nft.standard}`,
+    ),
+  );
+  if (keys.size !== nfts.length) {
+    throw new Error("Stored account metadata contains duplicate NFTs");
+  }
+  return nfts;
+}
+
+function isSafeStoredImageUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === "https:" &&
+      !url.username &&
+      !url.password &&
+      !isLocalHostname(url.hostname)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function isLocalHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+  return (
+    normalized === "localhost" ||
+    normalized.endsWith(".localhost") ||
+    normalized.endsWith(".local") ||
+    normalized.endsWith(".internal") ||
+    normalized.endsWith(".home.arpa") ||
+    normalized === "::1" ||
+    normalized.includes(":") ||
+    normalized === "0.0.0.0" ||
+    /^127\./.test(normalized) ||
+    /^10\./.test(normalized) ||
+    /^192\.168\./.test(normalized) ||
+    /^169\.254\./.test(normalized) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(normalized)
+  );
 }
 
 function parseStoredTokens(value: unknown): StoredWalletToken[] {

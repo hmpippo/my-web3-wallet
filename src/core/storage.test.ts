@@ -16,7 +16,13 @@ const testVault: EncryptedVault = {
 const testAccountMetadata: WalletAccountMetadata = {
   version: 1,
   accounts: [
-    { path: "m/44'/60'/0'/0/0", name: "Account 1", hidden: false, tokens: [] },
+    {
+      path: "m/44'/60'/0'/0/0",
+      name: "Account 1",
+      hidden: false,
+      tokens: [],
+      nfts: [],
+    },
     {
       path: "m/44'/60'/0'/0/2",
       name: "Savings",
@@ -28,6 +34,16 @@ const testAccountMetadata: WalletAccountMetadata = {
           symbol: "TST",
           decimals: 6,
           hidden: false,
+        },
+      ],
+      nfts: [
+        {
+          address: "0x0000000000000000000000000000000000000003",
+          tokenId: "42",
+          standard: "ERC-721",
+          name: "Test NFT",
+          description: "A test item",
+          imageUrl: "https://example.com/image.png",
         },
       ],
     },
@@ -173,7 +189,42 @@ describe("vault storage", () => {
     ).rejects.toThrow("invalid token");
   });
 
-  it("loads legacy account records without token lists as empty lists", async () => {
+  it("rejects duplicate or invalid NFT metadata", async () => {
+    vi.stubGlobal("window", { localStorage: createLocalStorageMock() });
+    const first = testAccountMetadata.accounts[1]!;
+    const nft = first.nfts![0]!;
+    await expect(
+      storageService.saveAccountMetadata({
+        ...testAccountMetadata,
+        accounts: [
+          testAccountMetadata.accounts[0]!,
+          { ...first, nfts: [nft, nft] },
+        ],
+      }),
+    ).rejects.toThrow("duplicate NFTs");
+
+    await expect(
+      storageService.saveAccountMetadata({
+        ...testAccountMetadata,
+        accounts: [
+          testAccountMetadata.accounts[0]!,
+          { ...first, nfts: [{ ...nft, imageUrl: "http://127.0.0.1/image" }] },
+        ],
+      }),
+    ).rejects.toThrow("invalid NFT");
+
+    await expect(
+      storageService.saveAccountMetadata({
+        ...testAccountMetadata,
+        accounts: [
+          testAccountMetadata.accounts[0]!,
+          { ...first, nfts: [{ ...nft, tokenId: "1e4" }] },
+        ],
+      }),
+    ).rejects.toThrow("invalid NFT");
+  });
+
+  it("loads legacy account records without token or NFT lists as empty lists", async () => {
     const localStorage = createLocalStorageMock();
     vi.stubGlobal("window", { localStorage });
     localStorage.setItem(
@@ -188,7 +239,7 @@ describe("vault storage", () => {
     );
 
     await expect(storageService.loadAccountMetadata()).resolves.toMatchObject({
-      accounts: [{ tokens: [] }],
+      accounts: [{ tokens: [], nfts: [] }],
     });
   });
 

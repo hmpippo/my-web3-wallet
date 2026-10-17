@@ -14,11 +14,18 @@ import {
 } from "@/core/hd-wallet";
 import {
   storageService,
+  type NftStandard,
+  type StoredWalletNft,
   type StoredWalletToken,
   type StorageService,
   type WalletAccountMetadata,
 } from "@/core/storage";
 import { sendNativeTransfer } from "./transaction-service";
+import {
+  normalizeNftAddress,
+  parseNftTokenId,
+  readNftMetadata,
+} from "./nft-service";
 import {
   normalizeTokenAddress,
   readTokenMetadata,
@@ -38,6 +45,7 @@ export interface WalletAccount {
   readonly address: Address;
   readonly hidden: boolean;
   readonly tokens: readonly StoredWalletToken[];
+  readonly nfts: readonly StoredWalletNft[];
 }
 
 export interface PreparedWallet {
@@ -50,6 +58,11 @@ export interface WalletServiceDependencies {
   readTokenMetadata?: (
     address: Address,
   ) => Promise<Omit<StoredWalletToken, "hidden">>;
+  readNftMetadata?: (
+    address: Address,
+    tokenId: bigint,
+    standard: NftStandard,
+  ) => Promise<StoredWalletNft>;
   sendTransfer?: (params: {
     to: Address;
     value: bigint;
@@ -87,11 +100,15 @@ export class WalletService {
   private readonly readTokenMetadata: NonNullable<
     WalletServiceDependencies["readTokenMetadata"]
   >;
+  private readonly readNftMetadata: NonNullable<
+    WalletServiceDependencies["readNftMetadata"]
+  >;
 
   constructor(dependencies: WalletServiceDependencies = {}) {
     this.storage = dependencies.storage ?? storageService;
     this.sendTransfer = dependencies.sendTransfer ?? sendNativeTransfer;
     this.readTokenMetadata = dependencies.readTokenMetadata ?? readTokenMetadata;
+    this.readNftMetadata = dependencies.readNftMetadata ?? readNftMetadata;
   }
 
   get isUnlocked(): boolean {
@@ -275,6 +292,7 @@ export class WalletService {
           address: derived.address,
           hidden: storedAccount.hidden,
           tokens: storedAccount.tokens ?? [],
+          nfts: storedAccount.nfts ?? [],
         };
         accounts.push(walletAccount);
         if (storedAccount.path === selectedPath) {
@@ -496,6 +514,117 @@ export class WalletService {
     await this.setTokenVisibility(address, false);
   }
 
+  async addNft(
+    contractAddress: string,
+    tokenIdInput: string,
+    standard: NftStandard,
+  ): Promise<StoredWalletNft> {
+    if (!this.state.isUnlocked) throw new Error("Wallet is locked");
+    if (standard !== "ERC-721" && standard !== "ERC-1155") {
+      throw new Error("Select ERC-721 or ERC-1155 as the NFT standard.");
+    }
+    const selectedIndex = this.state.selectedAccountIndex;
+    const account = this.state.accounts.find(
+      (candidate) => candidate.index === selectedIndex,
+    );
+    if (!account) throw new Error("Wallet is locked");
+    const address = normalizeNftAddress(contractAddress);
+    const tokenId = parseNftTokenId(tokenIdInput).toString();
+    if (
+      account.nfts.some(
+        (nft) =>
+          nft.address.toLowerCase() === address.toLowerCase() &&
+          nft.tokenId === tokenId &&
+          nft.standard === standard,
+      )
+    ) {
+      throw new Error("This NFT is already listed in the selected account.");
+    }
+
+    const mutationVersion = this.beginAccountMutation();
+    const operationVersion = this.operationVersion;
+    try {
+      const nft = await this.readNftMetadata(
+        address,
+        BigInt(tokenId),
+        standard,
+      );
+      this.assertOperationCurrent(operationVersion);
+      const currentAccount = this.state.accounts.find(
+        (candidate) => candidate.index === selectedIndex,
+      );
+      if (!currentAccount) throw new Error("Wallet is locked");
+      if (
+        currentAccount.nfts.some(
+          (candidate) =>
+            candidate.address.toLowerCase() === address.toLowerCase() &&
+            candidate.tokenId === tokenId &&
+            candidate.standard === standard,
+        )
+      ) {
+        throw new Error("This NFT is already listed in the selected account.");
+      }
+      const accounts = this.state.accounts.map((candidate) =>
+        candidate.index === selectedIndex
+          ? { ...candidate, nfts: [...candidate.nfts, nft] }
+          : candidate,
+      );
+      await this.persistAccounts(accounts, selectedIndex);
+      this.assertOperationCurrent(operationVersion);
+      this.updateState(true, accounts, selectedIndex);
+      return nft;
+    } finally {
+      this.finishAccountMutation(mutationVersion);
+    }
+  }
+
+  async removeNft(
+    addressInput: Address,
+    tokenIdInput: string,
+    standard: NftStandard,
+  ): Promise<void> {
+    if (!this.state.isUnlocked) throw new Error("Wallet is locked");
+    const selectedIndex = this.state.selectedAccountIndex;
+    const selected = this.state.accounts.find(
+      (candidate) => candidate.index === selectedIndex,
+    );
+    if (!selected) throw new Error("Wallet is locked");
+    const address = normalizeNftAddress(addressInput);
+    const tokenId = parseNftTokenId(tokenIdInput).toString();
+    if (
+      !selected.nfts.some(
+        (nft) =>
+          nft.address.toLowerCase() === address.toLowerCase() &&
+          nft.tokenId === tokenId &&
+          nft.standard === standard,
+      )
+    ) {
+      throw new RangeError("NFT does not exist in this account");
+    }
+    const mutationVersion = this.beginAccountMutation();
+    const operationVersion = this.operationVersion;
+    try {
+      const accounts = this.state.accounts.map((candidate) =>
+        candidate.index === selectedIndex
+          ? {
+              ...candidate,
+              nfts: candidate.nfts.filter(
+                (nft) =>
+                  nft.address.toLowerCase() !== address.toLowerCase() ||
+                  nft.tokenId !== tokenId ||
+                  nft.standard !== standard,
+              ),
+            }
+          : candidate,
+      );
+      await this.persistAccounts(accounts, selectedIndex);
+      this.assertOperationCurrent(operationVersion);
+      this.updateState(true, accounts, selectedIndex);
+    } finally {
+      this.finishAccountMutation(mutationVersion);
+    }
+  }
+
   private async setTokenVisibility(
     address: Address,
     hidden: boolean,
@@ -598,11 +727,12 @@ export class WalletService {
     if (!selected) throw new Error("Select a visible account before saving");
     await this.storage.saveAccountMetadata({
       version: 1,
-      accounts: accounts.map(({ path, name, hidden, tokens }) => ({
+      accounts: accounts.map(({ path, name, hidden, tokens, nfts }) => ({
         path,
         name,
         hidden,
         tokens,
+        nfts,
       })),
       selectedPath: selected.path,
     });
@@ -645,7 +775,9 @@ export class WalletService {
           account.address === accounts[index]?.address &&
           account.hidden === accounts[index]?.hidden &&
           JSON.stringify(account.tokens) ===
-            JSON.stringify(accounts[index]?.tokens),
+            JSON.stringify(accounts[index]?.tokens) &&
+          JSON.stringify(account.nfts) ===
+            JSON.stringify(accounts[index]?.nfts),
       )
     ) {
       return;
@@ -656,6 +788,9 @@ export class WalletService {
           ...account,
           tokens: Object.freeze(
             account.tokens.map((token) => Object.freeze({ ...token })),
+          ),
+          nfts: Object.freeze(
+            account.nfts.map((nft) => Object.freeze({ ...nft })),
           ),
         }),
       ),
@@ -688,6 +823,7 @@ function createWalletAccount(index: number, address: Address): WalletAccount {
     address,
     hidden: false,
     tokens: [],
+    nfts: [],
   };
 }
 
@@ -695,7 +831,9 @@ function createDefaultMetadata(): WalletAccountMetadata {
   const path = accountDerivationPath(0);
   return {
     version: 1,
-    accounts: [{ path, name: "Account 1", hidden: false, tokens: [] }],
+    accounts: [
+      { path, name: "Account 1", hidden: false, tokens: [], nfts: [] },
+    ],
     selectedPath: path,
   };
 }

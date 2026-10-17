@@ -78,6 +78,7 @@ describe("WalletService", () => {
           address: prepared.address,
           hidden: false,
           tokens: [],
+          nfts: [],
         },
       ],
       selectedAccountIndex: 0,
@@ -150,6 +151,7 @@ describe("WalletService", () => {
           address: EXPECTED_ADDRESS,
           hidden: false,
           tokens: [],
+          nfts: [],
         },
       ],
       selectedAccountIndex: 0,
@@ -272,6 +274,7 @@ describe("WalletService", () => {
       address: SECOND_ADDRESS,
       hidden: false,
       tokens: [],
+      nfts: [],
     });
     expect(service.getState()).toEqual({
       isUnlocked: true,
@@ -284,6 +287,7 @@ describe("WalletService", () => {
           address: EXPECTED_ADDRESS,
           hidden: false,
           tokens: [],
+          nfts: [],
         },
         second,
       ],
@@ -310,6 +314,7 @@ describe("WalletService", () => {
           address: EXPECTED_ADDRESS,
           hidden: false,
           tokens: [],
+          nfts: [],
         },
         {
           index: 1,
@@ -318,6 +323,7 @@ describe("WalletService", () => {
           address: SECOND_ADDRESS,
           hidden: false,
           tokens: [],
+          nfts: [],
         },
       ],
       selectedAccountIndex: 1,
@@ -425,6 +431,7 @@ describe("WalletService", () => {
         name: "Account 1",
         hidden: false,
         tokens: [],
+        nfts: [],
       },
     ]);
   });
@@ -520,6 +527,103 @@ describe("WalletService", () => {
       service.addToken("0x0000000000000000000000000000000000000001"),
     ).rejects.toThrow("Could not read ERC-20 metadata");
     expect(service.getState().accounts[0]?.tokens).toEqual([]);
+  });
+
+  it("manages NFT metadata per selected account and permanently removes local entries", async () => {
+    const { storage, getAccountMetadata } = createStorage();
+    const readMetadata = vi.fn(
+      async (
+        address: `0x${string}`,
+        tokenId: bigint,
+        standard: "ERC-721" | "ERC-1155",
+      ) => ({
+        address,
+        tokenId: tokenId.toString(),
+        standard,
+        name: "Test NFT",
+        description: "Locally listed metadata",
+        imageUrl: "https://example.com/nft.png",
+      }),
+    );
+    const service = new WalletService({
+      storage,
+      readNftMetadata: readMetadata,
+    });
+    await service.importWallet(TEST_MNEMONIC, "correct horse");
+    await service.addAccount();
+
+    const nft = await service.addNft(
+      "0x0000000000000000000000000000000000000001",
+      "00042",
+      "ERC-721",
+    );
+    expect(nft).toMatchObject({
+      tokenId: "42",
+      standard: "ERC-721",
+      name: "Test NFT",
+    });
+    await expect(
+      service.addNft(
+        "0x0000000000000000000000000000000000000001",
+        "42",
+        "ERC-721",
+      ),
+    ).rejects.toThrow("already listed");
+
+    await service.selectAccount(0);
+    expect(service.getState().accounts[0]?.nfts).toEqual([]);
+    await expect(
+      service.addNft(
+        "0x0000000000000000000000000000000000000001",
+        "42",
+        "ERC-721",
+      ),
+    ).resolves.toMatchObject({ name: "Test NFT" });
+    await service.removeNft(
+      "0x0000000000000000000000000000000000000001",
+      "42",
+      "ERC-721",
+    );
+    expect(service.getState().accounts[0]?.nfts).toEqual([]);
+
+    expect(getAccountMetadata()?.accounts.map((account) => account.nfts)).toEqual([
+      [],
+      [
+        {
+          address: "0x0000000000000000000000000000000000000001",
+          tokenId: "42",
+          standard: "ERC-721",
+          name: "Test NFT",
+          description: "Locally listed metadata",
+          imageUrl: "https://example.com/nft.png",
+        },
+      ],
+    ]);
+    expect(readMetadata).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not persist an NFT when the contract or metadata fetch fails", async () => {
+    const { storage, getAccountMetadata } = createStorage();
+    const service = new WalletService({
+      storage,
+      readNftMetadata: vi.fn(async () => {
+        throw new Error("NFT metadata could not be loaded");
+      }),
+    });
+    await service.importWallet(TEST_MNEMONIC, "correct horse");
+
+    await expect(service.addNft("invalid", "1", "ERC-721")).rejects.toThrow(
+      "valid NFT contract address",
+    );
+    await expect(
+      service.addNft(
+        "0x0000000000000000000000000000000000000001",
+        "1",
+        "ERC-721",
+      ),
+    ).rejects.toThrow("NFT metadata could not be loaded");
+    expect(service.getState().accounts[0]?.nfts).toEqual([]);
+    expect(getAccountMetadata()?.accounts[0]?.nfts).toBeUndefined();
   });
 
   it("rejects account operations while locked or for an unknown index", async () => {

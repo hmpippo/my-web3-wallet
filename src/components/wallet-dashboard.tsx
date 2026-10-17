@@ -14,6 +14,7 @@ import { getNativeBalance } from "@/services/balance-service";
 import { walletService } from "@/services/wallet-service";
 import { TransactionHistory } from "@/components/transaction-history";
 import { TokenPortfolio } from "@/components/token-portfolio";
+import { NftPortfolio } from "@/components/nft-portfolio";
 
 export function WalletDashboard() {
   const router = useRouter();
@@ -40,7 +41,7 @@ export function WalletDashboard() {
   const [draftAccountName, setDraftAccountName] = useState("");
   const [isSavingAccount, setIsSavingAccount] = useState(false);
   const [activePortfolioTab, setActivePortfolioTab] = useState<
-    "tokens" | "activity"
+    "tokens" | "nfts" | "activity"
   >("tokens");
   const visibleAccounts = walletState.accounts.filter((account) => !account.hidden);
   const selectedAccount = walletState.accounts.find(
@@ -344,6 +345,17 @@ export function WalletDashboard() {
           Tokens
         </button>
         <button
+          aria-controls="portfolio-nfts"
+          aria-selected={activePortfolioTab === "nfts"}
+          className="portfolio-tab"
+          id="portfolio-nfts-tab"
+          onClick={() => setActivePortfolioTab("nfts")}
+          role="tab"
+          type="button"
+        >
+          NFTs
+        </button>
+        <button
           aria-controls="portfolio-activity"
           aria-selected={activePortfolioTab === "activity"}
           className="portfolio-tab"
@@ -365,6 +377,18 @@ export function WalletDashboard() {
             accountAddress={address}
             key={selectedAccount.path}
             tokens={selectedAccount.tokens}
+          />
+        </div>
+      ) : null}
+      {activePortfolioTab === "nfts" && address && selectedAccount ? (
+        <div
+          aria-labelledby="portfolio-nfts-tab"
+          id="portfolio-nfts"
+          role="tabpanel"
+        >
+          <NftPortfolio
+            key={selectedAccount.path}
+            nfts={selectedAccount.nfts}
           />
         </div>
       ) : null}

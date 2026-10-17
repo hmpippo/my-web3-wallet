@@ -919,6 +919,229 @@ input {
   font-size: 0.72rem;
 }
 
+.nft-card {
+  position: relative;
+}
+
+.nft-add-form {
+  display: grid;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 1.25rem;
+}
+
+.nft-add-form > label {
+  color: var(--foreground);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.nft-add-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(6rem, 0.55fr) auto auto;
+  gap: 0.55rem;
+}
+
+.nft-add-controls input,
+.nft-add-controls select {
+  min-width: 0;
+  min-height: 2.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+  background: #fbfcfb;
+  padding: 0 0.75rem;
+  color: var(--foreground);
+  font: inherit;
+  font-size: 0.78rem;
+}
+
+.nft-add-controls input:focus-visible,
+.nft-add-controls select:focus-visible {
+  border-color: var(--accent);
+  outline: 3px solid rgb(20 107 75 / 12%);
+}
+
+.nft-add-controls .button {
+  min-height: 2.75rem;
+  padding: 0 0.85rem;
+  white-space: nowrap;
+}
+
+.nft-error {
+  margin: 1rem 0;
+}
+
+.nft-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: 0.85rem;
+  margin: 1.2rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nft-grid-item {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 0.85rem;
+  background: #fbfcfb;
+}
+
+.nft-tile {
+  display: grid;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  padding: 0.55rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.nft-thumbnail,
+.nft-placeholder {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 0.55rem;
+  background: #eef2ef;
+  object-fit: cover;
+}
+
+.nft-placeholder {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.nft-tile-name {
+  overflow: hidden;
+  margin-top: 0.65rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nft-tile-standard {
+  overflow: hidden;
+  margin-top: 0.25rem;
+  color: var(--muted);
+  font-size: 0.66rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nft-remove {
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  padding: 0.55rem;
+  width: 100%;
+  font: inherit;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.nft-remove:hover {
+  color: #8b3020;
+}
+
+.nft-remove:disabled {
+  cursor: wait;
+}
+
+.nft-detail-backdrop {
+  position: fixed;
+  z-index: 20;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  overflow-y: auto;
+  background: rgb(13 24 17 / 58%);
+  padding: 1.25rem;
+}
+
+.nft-detail {
+  position: relative;
+  width: min(100%, 38rem);
+  max-height: min(90vh, 54rem);
+  overflow-y: auto;
+  border-radius: 1rem;
+  background: var(--surface);
+  padding: 1.25rem;
+  box-shadow: 0 1.5rem 4rem rgb(0 0 0 / 24%);
+}
+
+.nft-detail-close {
+  display: block;
+  margin: 0 0 0.75rem auto;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  padding: 0.35rem 0;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.nft-detail-image {
+  display: block;
+  width: 100%;
+  max-height: 55vh;
+  border-radius: 0.7rem;
+  background: #eef2ef;
+  object-fit: contain;
+}
+
+.nft-detail h3 {
+  margin: 1rem 0 0.45rem;
+  font-size: 1.3rem;
+  letter-spacing: -0.04em;
+}
+
+.nft-detail-description {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.nft-detail-fields {
+  display: grid;
+  gap: 0.75rem;
+  margin: 1.1rem 0 0;
+  border-top: 1px solid var(--line);
+  padding-top: 1rem;
+}
+
+.nft-detail-fields div {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.nft-detail-fields dt {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.nft-detail-fields dd {
+  margin: 0;
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.nft-detail-fields code {
+  font-size: 0.72rem;
+}
+
 .history-card {
   max-width: 680px;
   margin-top: 1rem;
@@ -1270,6 +1493,10 @@ input {
   }
 
   .token-add-controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .nft-add-controls {
     grid-template-columns: minmax(0, 1fr);
   }
 
