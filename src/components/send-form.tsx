@@ -22,6 +22,7 @@ import {
 } from "viem";
 import { CHAIN } from "@/core/chain";
 import type { StoredWalletToken } from "@/core/storage";
+import { CopyButton } from "@/components/copy-button";
 import {
   estimateErc20Transfer,
   estimateNativeTransfer,
@@ -193,6 +194,9 @@ export function SendForm() {
         <form className="send-fields" onSubmit={reviewTransfer}>
           <p className="muted-copy send-account">
             Sending from {selectedAddress ?? "locked wallet"}
+            {selectedAddress ? (
+              <CopyButton label="your address" value={selectedAddress} />
+            ) : null}
           </p>
           <label>
             Asset
@@ -271,11 +275,17 @@ export function SendForm() {
             <dl>
               <div>
                 <dt>From</dt>
-                <dd>{review.from}</dd>
+                <dd className="address-line">
+                  {review.from}
+                  <CopyButton label="sender address" value={review.from} />
+                </dd>
               </div>
               <div>
                 <dt>To</dt>
-                <dd>{review.to}</dd>
+                <dd className="address-line">
+                  {review.to}
+                  <CopyButton label="recipient address" value={review.to} />
+                </dd>
               </div>
               <div>
                 <dt>Amount</dt>
@@ -288,7 +298,13 @@ export function SendForm() {
               {review.token ? (
                 <div>
                   <dt>Token contract</dt>
-                  <dd>{review.token.address}</dd>
+                  <dd className="address-line">
+                    {review.token.address}
+                    <CopyButton
+                      label={`${review.token.symbol} contract address`}
+                      value={review.token.address}
+                    />
+                  </dd>
                 </div>
               ) : null}
               <div>

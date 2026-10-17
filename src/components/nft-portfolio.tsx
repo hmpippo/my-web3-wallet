@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useState, type FormEvent } from "react";
 import type { NftStandard, StoredWalletNft } from "@/core/storage";
 import { walletService } from "@/services/wallet-service";
+import { CopyButton } from "@/components/copy-button";
 
 interface NftPortfolioProps {
   nfts: readonly StoredWalletNft[];
@@ -224,7 +225,13 @@ export function NftPortfolio({ nfts }: NftPortfolioProps) {
               <div>
                 <dt>Contract</dt>
                 <dd>
-                  <code>{selectedNft.address}</code>
+                  <span className="address-line">
+                    <code>{selectedNft.address}</code>
+                    <CopyButton
+                      label="NFT contract address"
+                      value={selectedNft.address}
+                    />
+                  </span>
                 </dd>
               </div>
               <div>

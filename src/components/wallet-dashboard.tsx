@@ -2,16 +2,15 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { formatEther, type Address } from "viem";
 import {
-  useCallback,
   useEffect,
   useState,
   useSyncExternalStore,
   type FormEvent,
 } from "react";
-import { getNativeBalance } from "@/services/balance-service";
+import { truncateAddress } from "@/lib/address";
 import { walletService } from "@/services/wallet-service";
+import { CopyButton } from "@/components/copy-button";
 import { TransactionHistory } from "@/components/transaction-history";
 import { TokenPortfolio } from "@/components/token-portfolio";
 import { NftPortfolio } from "@/components/nft-portfolio";
@@ -24,15 +23,6 @@ export function WalletDashboard() {
     () => walletService.getState(),
   );
   const address = walletState.address;
-  const [balanceResult, setBalanceResult] = useState<{
-    address: Address;
-    value: string;
-  } | null>(null);
-  const [balanceError, setBalanceError] = useState<{
-    address: Address;
-    message: string;
-  } | null>(null);
-  const [isRefreshingBalance, setIsRefreshingBalance] = useState(false);
   const [accountError, setAccountError] = useState<string | null>(null);
   const [isManagingAccounts, setIsManagingAccounts] = useState(false);
   const [editingAccountIndex, setEditingAccountIndex] = useState<number | null>(
@@ -40,6 +30,7 @@ export function WalletDashboard() {
   );
   const [draftAccountName, setDraftAccountName] = useState("");
   const [isSavingAccount, setIsSavingAccount] = useState(false);
+  const [showReceiveNote, setShowReceiveNote] = useState(false);
   const [activePortfolioTab, setActivePortfolioTab] = useState<
     "tokens" | "nfts" | "activity"
   >("tokens");
@@ -47,58 +38,6 @@ export function WalletDashboard() {
   const selectedAccount = walletState.accounts.find(
     (account) => account.index === walletState.selectedAccountIndex,
   );
-
-  const balance =
-    address && balanceResult?.address === address ? balanceResult.value : null;
-  const currentBalanceError =
-    address && balanceError?.address === address ? balanceError.message : null;
-  const isLoadingBalance =
-    Boolean(address) &&
-    (isRefreshingBalance || (balance === null && currentBalanceError === null));
-
-  const refreshBalance = useCallback(() => {
-    if (!address) return;
-    setIsRefreshingBalance(true);
-    setBalanceError(null);
-    getNativeBalance(address)
-      .then((result) => setBalanceResult({ address, value: formatEther(result) }))
-      .catch((error: unknown) => {
-        setBalanceError({
-          address,
-          message:
-            error instanceof Error
-              ? error.message
-              : "Could not load the Sepolia balance.",
-        });
-      })
-      .finally(() => setIsRefreshingBalance(false));
-  }, [address]);
-
-  useEffect(() => {
-    if (!address) return;
-    let cancelled = false;
-    getNativeBalance(address)
-      .then((result) => {
-        if (!cancelled) setBalanceResult({ address, value: formatEther(result) });
-      })
-      .catch((error: unknown) => {
-        if (!cancelled) {
-          setBalanceError({
-            address,
-            message:
-              error instanceof Error
-                ? error.message
-                : "Could not load the Sepolia balance.",
-          });
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setIsRefreshingBalance(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [address]);
 
   // Opening the NFT list (or switching account) re-checks ownership on chain so
   // a token transferred away in the meantime disappears from the account.
@@ -180,9 +119,9 @@ export function WalletDashboard() {
         </button>
       </section>
 
-      <section className="preview-card balance-card" aria-labelledby="balance-heading">
+      <section className="preview-card balance-card" aria-labelledby="account-heading">
         <div className="balance-topline">
-          <h2 id="balance-heading">Available balance</h2>
+          <h2 id="account-heading">Account</h2>
           <span className="network-label">
             <span className="status-dot" aria-hidden="true" />
             Sepolia testnet
@@ -235,7 +174,13 @@ export function WalletDashboard() {
                         <span className="account-hidden-label">Hidden</span>
                       ) : null}
                     </div>
-                    <code>{account.address}</code>
+                    <div className="address-line">
+                      <code>{account.address}</code>
+                      <CopyButton
+                        label={`${account.name} address`}
+                        value={account.address}
+                      />
+                    </div>
                     <span className="account-derivation-path">{account.path}</span>
                   </div>
                   {editingAccountIndex === account.index ? (
@@ -313,31 +258,30 @@ export function WalletDashboard() {
             {accountError}
           </p>
         ) : null}
-        {isLoadingBalance ? (
-          <p className="balance-placeholder" role="status">
-            Loading...
-          </p>
-        ) : currentBalanceError ? (
-          <div className="balance-error" role="alert">
-            <p>{currentBalanceError}</p>
-            <button className="text-link" onClick={refreshBalance} type="button">
-              Try again
-            </button>
+        {address ? (
+          <div className="selected-address">
+            <code title={address}>{truncateAddress(address)}</code>
+            <CopyButton label="your address" value={address} />
           </div>
-        ) : (
-          <p className="balance-value">
-            {balance} <span>ETH</span>
-          </p>
-        )}
-        <div className="address-panel">
-          <span>Your address</span>
-          <code>{address}</code>
-        </div>
+        ) : null}
         <div className="dashboard-actions">
           <Link className="button button-primary" href="/send">
-            Send ETH
+            Send
           </Link>
+          <button
+            aria-expanded={showReceiveNote}
+            className="button button-outline"
+            onClick={() => setShowReceiveNote((open) => !open)}
+            type="button"
+          >
+            Receive
+          </button>
         </div>
+        {showReceiveNote ? (
+          <p className="receive-note" role="status">
+            Receive is coming soon.
+          </p>
+        ) : null}
       </section>
       <div className="portfolio-tabs" role="tablist" aria-label="Wallet overview">
         <button

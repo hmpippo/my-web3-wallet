@@ -333,12 +333,45 @@ input {
   font-size: 1rem;
 }
 
-.balance-placeholder {
-  margin: 1rem 0 0.3rem;
-  color: #9aa69e;
-  font-size: clamp(2.5rem, 8vw, 4rem);
-  font-weight: 600;
-  letter-spacing: -0.07em;
+.copy-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  flex: 0 0 auto;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0;
+}
+
+.copy-button:hover {
+  border-color: var(--line);
+  color: var(--accent);
+}
+
+.copy-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.copy-button[data-copied="true"] {
+  color: var(--accent);
+}
+
+.copy-button svg {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.address-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
 }
 
 .muted-copy {
@@ -353,12 +386,6 @@ input {
   align-items: center;
   justify-content: center;
   margin-top: 1.5rem;
-  background: var(--accent);
-  color: white;
-}
-
-.preview-card .button:hover {
-  background: #0f593e;
 }
 
 .form-page {
@@ -527,8 +554,7 @@ input {
   accent-color: var(--accent);
 }
 
-.form-error,
-.balance-error {
+.form-error {
   border: 1px solid #f0d1ca;
   border-radius: 0.65rem;
   background: #fff7f4;
@@ -717,52 +743,42 @@ input {
   outline: 3px solid rgb(20 107 75 / 12%);
 }
 
-.balance-value {
-  margin: 1.25rem 0 1.75rem;
-  font-size: clamp(2.8rem, 9vw, 4.5rem);
-  font-weight: 600;
-  letter-spacing: -0.08em;
+.selected-address {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 1.1rem;
 }
 
-.balance-value span {
-  color: var(--muted);
-  font-size: 0.45em;
-  letter-spacing: -0.03em;
+.selected-address code {
+  overflow-wrap: anywhere;
+  color: var(--foreground);
+  font-size: 0.9rem;
 }
 
-.balance-error {
-  margin-top: 1.25rem;
-}
-
-.balance-error p {
-  margin: 0 0 0.65rem;
-}
-
-.address-panel {
-  display: grid;
-  gap: 0.45rem;
-  border-top: 1px solid var(--line);
-  padding-top: 1.2rem;
-}
-
-.address-panel span,
 .transfer-review dt {
   color: var(--muted);
   font-size: 0.75rem;
 }
 
-.address-panel code {
-  overflow-wrap: anywhere;
-  color: var(--foreground);
-  font-size: 0.82rem;
-}
-
 .dashboard-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
   margin-top: 1.5rem;
 }
 
+/* The wallet overview CTA row spaces itself; cancel the generic card margin. */
 .dashboard-actions .button {
-  min-width: 9rem;
+  min-height: 3.25rem;
+  margin-top: 0;
+  font-size: 1rem;
+}
+
+.receive-note {
+  margin: 0.85rem 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
 }
 
 .portfolio-tabs {
@@ -875,6 +891,16 @@ input {
 .token-identity > span {
   color: var(--muted);
   font-size: 0.75rem;
+}
+
+.token-identity > .token-badge {
+  justify-self: start;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  padding: 0.2rem 0.5rem;
+  font-size: 0.65rem;
+  font-weight: 700;
 }
 
 .token-identity code {
@@ -1537,9 +1563,15 @@ input {
     text-align: left;
   }
 
-  .token-item > .text-button {
+  .token-actions {
     grid-column: 2;
     grid-row: 1 / span 2;
+    flex-direction: column;
+    align-items: flex-end;
+  }
+
+  .dashboard-actions {
+    grid-template-columns: 1fr;
   }
 
   .history-heading {
