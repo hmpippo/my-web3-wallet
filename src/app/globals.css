@@ -617,9 +617,8 @@ input {
 
 .account-controls {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
-  gap: 0.5rem 0.75rem;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.5rem;
   margin-top: 1.25rem;
 }
 
@@ -646,15 +645,9 @@ input {
   outline-offset: 2px;
 }
 
-.account-add {
-  min-height: 2.75rem;
-  padding: 0 0.85rem;
-  font-size: 0.78rem;
-}
-
-.account-management {
-  grid-column: 1 / -1;
-  margin-top: 0.35rem;
+.account-manage-link {
+  display: inline-flex;
+  margin-top: 0.85rem;
 }
 
 .account-management-panel {
@@ -741,6 +734,13 @@ input {
 .account-rename-form input:focus-visible {
   border-color: var(--accent);
   outline: 3px solid rgb(20 107 75 / 12%);
+}
+
+.account-detail-note {
+  grid-column: 1 / -1;
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
 }
 
 .selected-address {
@@ -935,11 +935,29 @@ input {
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
-/* Token visibility switches and the Tokens overflow menu. */
-.manage-token-import {
+/* Centered card-footer action shared by the tokens and accounts manager pages. */
+.card-footer-action {
   display: flex;
-  justify-content: flex-end;
+  justify-content: center;
+  border-top: 1px solid var(--line);
   margin-top: 1.5rem;
+  padding-top: 1.5rem;
+}
+
+.card-footer-action .button {
+  min-width: 12rem;
+  min-height: 3rem;
+  font-size: 0.9rem;
+}
+
+.card-footer-action .button-plus {
+  margin-right: 0.45rem;
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
+.token-item-manage:last-child {
+  border-bottom: 0;
 }
 
 .toggle-switch {
@@ -1635,6 +1653,10 @@ input {
 
   .account-management-row {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .account-management-row > .overflow-menu {
+    justify-self: end;
   }
 
   .account-row-actions {

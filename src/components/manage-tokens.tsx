@@ -119,8 +119,11 @@ export function ManageTokens() {
           </p>
         ) : null}
 
-        <div className="manage-token-import">
+        <div className="card-footer-action">
           <Link className="button button-primary" href="/tokens/import">
+            <span aria-hidden="true" className="button-plus">
+              +
+            </span>
             Import token
           </Link>
         </div>
