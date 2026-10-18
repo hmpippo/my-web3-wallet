@@ -2090,4 +2090,10 @@ input {
   font-size: 0.78rem;
 }
 
+.clipboard-notice.is-cleared {
+  border-color: #cfe5d7;
+  background: #f1faf4;
+  color: #205c3e;
+}
+
 

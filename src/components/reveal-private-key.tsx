@@ -1,8 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useParams } from "next/navigation";
-import { useState, useSyncExternalStore, type FormEvent } from "react";
+import { useParams, usePathname } from "next/navigation";
+import {
+  useEffect,
+  useState,
+  useSyncExternalStore,
+  type FormEvent,
+} from "react";
 import type { Hex } from "viem";
 import { CopyButton } from "@/components/copy-button";
 import { clearClipboard } from "@/lib/clipboard";
@@ -14,10 +19,14 @@ import { walletService } from "@/services/wallet-service";
  * password is re-verified against the encrypted vault before the key is shown:
  * an unlocked tab left unattended must not be enough to read a key out.
  *
- * The revealed key lives only in this component's state. While hidden the key
- * text is blurred and non-selectable, with a reveal button laid over it; on
- * reveal the button disappears and clicking the text again hides it. Once
- * copied, the card itself reminds the user the secret is still on the clipboard.
+ * The revealed key lives only in this component's state, and is bound to the
+ * route it was unlocked on. The App Router keeps visited route trees mounted, so
+ * navigating to the account page and back would otherwise leave the key in
+ * memory and skip the password prompt; the path binding forces a fresh unlock on
+ * every entry. While hidden the key text is blurred and non-selectable, with a
+ * reveal button laid over it; on reveal the button disappears and clicking the
+ * text again hides it. Once copied, the card itself reminds the user the secret
+ * is still on the clipboard.
  *
  * The index is read on the client with `useParams` so the page itself stays
  * prerenderable.
@@ -25,6 +34,7 @@ import { walletService } from "@/services/wallet-service";
 export function RevealPrivateKey() {
   const params = useParams<{ index: string }>();
   const index = Number(params?.index);
+  const pathname = usePathname();
   const { chain } = useActiveChain();
   const walletState = useSyncExternalStore(
     walletService.subscribe,
@@ -35,7 +45,9 @@ export function RevealPrivateKey() {
     ? walletState.accounts.find((candidate) => candidate.index === index)
     : undefined;
 
-  const [privateKey, setPrivateKey] = useState<Hex | null>(null);
+  const [unlocked, setUnlocked] = useState<{ path: string; key: Hex } | null>(
+    null,
+  );
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isKeyVisible, setIsKeyVisible] = useState(false);
@@ -44,6 +56,21 @@ export function RevealPrivateKey() {
   const [clipboardState, setClipboardState] = useState<
     "idle" | "warning" | "cleared"
   >("idle");
+
+  // Drop the revealed key as soon as this screen stops being the active route,
+  // so a round trip to the account page can never leave it readable.
+  if (unlocked && unlocked.path !== pathname) {
+    setUnlocked(null);
+  }
+  const privateKey = unlocked?.key ?? null;
+
+  // The "Clipboard cleared." confirmation is transient; the "still on your
+  // clipboard" warning stays up until the user clears it.
+  useEffect(() => {
+    if (clipboardState !== "cleared") return;
+    const timer = setTimeout(() => setClipboardState("idle"), 2000);
+    return () => clearTimeout(timer);
+  }, [clipboardState]);
 
   if (!account) {
     return (
@@ -69,7 +96,8 @@ export function RevealPrivateKey() {
       setPassword("");
       setShowPassword(false);
       setIsKeyVisible(false);
-      setPrivateKey(key);
+      setClipboardState("idle");
+      setUnlocked({ path: pathname, key });
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -223,7 +251,14 @@ export function RevealPrivateKey() {
         </div>
 
         {clipboardState !== "idle" ? (
-          <div className="clipboard-notice" role="status">
+          <div
+            className={
+              clipboardState === "cleared"
+                ? "clipboard-notice is-cleared"
+                : "clipboard-notice"
+            }
+            role="status"
+          >
             {clipboardState === "warning" ? (
               <>
                 <span>The sensitive information remains on your clipboard.</span>
