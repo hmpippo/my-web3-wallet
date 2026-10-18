@@ -36,6 +36,10 @@ import {
 } from "@/core/webauthn";
 import { decodeBase64 } from "@/lib/base64";
 import { sendErc20Transfer, sendNativeTransfer } from "./transaction-service";
+import {
+  readDelegatedAddress as defaultReadDelegatedAddress,
+  revokeDelegation as defaultRevokeDelegation,
+} from "./account-abstraction-service";
 import { chainService } from "./chain-service";
 import {
   normalizeNftAddress,
@@ -134,6 +138,17 @@ export interface WalletServiceDependencies {
     gas?: bigint;
     gasPrice?: bigint;
   }) => Promise<Hash>;
+  /** Reads the EIP-7702 delegate address for an account, if any. */
+  readDelegatedAddress?: (
+    address: Address,
+    chainId: number,
+  ) => Promise<Address | null>;
+  /** Signs and broadcasts an EIP-7702 authorization that clears a delegation. */
+  revokeDelegation?: (params: {
+    address: Address;
+    chainId: number;
+    privateKey: Hex;
+  }) => Promise<Hash>;
   /** Supplies the chain used by background work (NFT ownership sync). */
   getActiveChainId?: () => number;
 }
@@ -179,6 +194,12 @@ export class WalletService {
   private readonly getActiveChainId: NonNullable<
     WalletServiceDependencies["getActiveChainId"]
   >;
+  private readonly readDelegatedAddress: NonNullable<
+    WalletServiceDependencies["readDelegatedAddress"]
+  >;
+  private readonly revokeDelegation: NonNullable<
+    WalletServiceDependencies["revokeDelegation"]
+  >;
   private readonly biometric: BiometricUnlockProvider;
 
   constructor(dependencies: WalletServiceDependencies = {}) {
@@ -191,6 +212,10 @@ export class WalletService {
     this.readNftOwnership = dependencies.readNftOwnership ?? readNftOwnership;
     this.getActiveChainId =
       dependencies.getActiveChainId ?? (() => chainService.activeChainId);
+    this.readDelegatedAddress =
+      dependencies.readDelegatedAddress ?? defaultReadDelegatedAddress;
+    this.revokeDelegation =
+      dependencies.revokeDelegation ?? defaultRevokeDelegation;
     this.biometric = dependencies.biometric ?? defaultBiometricProvider;
   }
 
@@ -1085,6 +1110,45 @@ export class WalletService {
       chainId: tx.chainId,
       gas: tx.estimate?.gas,
       gasPrice: tx.estimate?.gasPrice,
+      privateKey,
+    });
+  }
+
+  /**
+   * Returns the EIP-7702 delegate set on the selected account, or `null` when
+   * the account has no active delegation.
+   */
+  async getDelegatedAddress(chainId: number): Promise<Address | null> {
+    const selectedAccount = this.state.accounts.find(
+      (account) => account.index === this.state.selectedAccountIndex,
+    );
+    if (!this.state.isUnlocked || !selectedAccount) {
+      throw new Error("Wallet is locked");
+    }
+    return this.readDelegatedAddress(selectedAccount.address, chainId);
+  }
+
+  /**
+   * Revokes the selected account's EIP-7702 delegation by authorizing the zero
+   * address and broadcasting the resulting type-4 transaction.
+   *
+   * The account both signs and pays for the transaction, so it must be part of
+   * the unlocked session and the in-memory key must still be available.
+   */
+  async revokeAccountDelegation(chainId: number): Promise<Hash> {
+    const selectedAccount = this.state.accounts.find(
+      (account) => account.index === this.state.selectedAccountIndex,
+    );
+    if (!this.state.isUnlocked || !selectedAccount) {
+      throw new Error("Wallet is locked");
+    }
+    const privateKey = this.privateKeys.get(selectedAccount.index);
+    if (!privateKey) {
+      throw new Error("Wallet is locked");
+    }
+    return this.revokeDelegation({
+      address: selectedAccount.address,
+      chainId,
       privateKey,
     });
   }

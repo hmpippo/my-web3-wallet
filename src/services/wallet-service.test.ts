@@ -1300,4 +1300,49 @@ describe("WalletService biometric unlock", () => {
     await expect(service.hasBiometricUnlock()).resolves.toBe(false);
     expect(getBiometricVault()).toBeNull();
   });
+
+  it("reads the selected account's delegation only while unlocked", async () => {
+    const delegate = "0xA0Cf798816D4b9b9866b5330EEa46a18382f251e" as const;
+    const readDelegatedAddress = vi.fn(async () => delegate);
+    const service = new WalletService({
+      storage: createStorage().storage,
+      readDelegatedAddress,
+    });
+
+    await expect(service.getDelegatedAddress(SEPOLIA)).rejects.toThrow(
+      "Wallet is locked",
+    );
+    expect(readDelegatedAddress).not.toHaveBeenCalled();
+
+    await service.importWallet(TEST_MNEMONIC, "correct horse");
+    await expect(service.getDelegatedAddress(SEPOLIA)).resolves.toBe(delegate);
+    expect(readDelegatedAddress).toHaveBeenCalledWith(EXPECTED_ADDRESS, SEPOLIA);
+
+    service.lock();
+    await expect(service.getDelegatedAddress(SEPOLIA)).rejects.toThrow(
+      "Wallet is locked",
+    );
+  });
+
+  it("revokes the selected account's delegation with its in-memory key", async () => {
+    const hash = `0x${"a".repeat(64)}` as const;
+    const revokeDelegation = vi.fn(async () => hash);
+    const service = new WalletService({
+      storage: createStorage().storage,
+      revokeDelegation,
+    });
+
+    await expect(service.revokeAccountDelegation(SEPOLIA)).rejects.toThrow(
+      "Wallet is locked",
+    );
+    expect(revokeDelegation).not.toHaveBeenCalled();
+
+    await service.importWallet(TEST_MNEMONIC, "correct horse");
+    await expect(service.revokeAccountDelegation(SEPOLIA)).resolves.toBe(hash);
+    expect(revokeDelegation).toHaveBeenCalledWith({
+      address: EXPECTED_ADDRESS,
+      chainId: SEPOLIA,
+      privateKey: expect.stringMatching(/^0x[0-9a-f]{64}$/),
+    });
+  });
 });

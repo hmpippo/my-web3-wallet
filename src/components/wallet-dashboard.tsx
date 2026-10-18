@@ -143,6 +143,9 @@ export function WalletDashboard() {
           <Link className="button button-outline" href="/receive">
             Receive
           </Link>
+          <Link className="button button-outline" href="/account-abstraction">
+            Account Abstract
+          </Link>
         </div>
       </section>
       <div className="portfolio-tabs" role="tablist" aria-label="Wallet overview">

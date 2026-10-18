@@ -843,7 +843,7 @@ input {
 
 .dashboard-actions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 0.75rem;
   margin-top: 1.5rem;
 }
@@ -912,6 +912,53 @@ input {
 .receive-verify {
   margin-top: 0.85rem;
   text-align: left;
+}
+
+.delegation-card {
+  max-width: 34rem;
+}
+
+.delegation-intro {
+  margin-top: 0.6rem;
+}
+
+.delegation-address {
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: var(--background);
+  margin-top: 1rem;
+  padding: 0.7rem 0.85rem;
+}
+
+.delegation-address code {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 0.85rem;
+}
+
+.delegation-success {
+  margin-top: 1rem;
+  color: var(--foreground);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.delegation-actions {
+  margin-top: 1.5rem;
+}
+
+.delegation-actions .button {
+  width: 100%;
+}
+
+.delegation-confirm-copy {
+  margin-bottom: 0.9rem;
+}
+
+.delegation-confirm-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
 }
 
 .portfolio-tabs {
