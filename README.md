@@ -1,5 +1,8 @@
 # My Wallet
 
+[![Lint](https://github.com/hmpippo/my-web3-wallet/actions/workflows/lint.yml/badge.svg)](https://github.com/hmpippo/my-web3-wallet/actions/workflows/lint.yml)
+[![Test](https://github.com/hmpippo/my-web3-wallet/actions/workflows/test.yml/badge.svg)](https://github.com/hmpippo/my-web3-wallet/actions/workflows/test.yml)
+
 A client-side, non-custodial EVM wallet MVP. The app includes wallet setup,
 import, unlock, balance, native-transfer, and paginated transaction-history
 flows across multiple EVM networks.
