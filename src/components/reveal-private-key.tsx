@@ -9,17 +9,15 @@ import { clearClipboard } from "@/lib/clipboard";
 import { useActiveChain } from "@/lib/use-active-chain";
 import { walletService } from "@/services/wallet-service";
 
-/** Placeholder shown while the key is masked; length matches a 32-byte key. */
-const MASKED_KEY = "•".repeat(66);
-
 /**
  * Two-step private-key screen. The wallet session is already unlocked, but the
  * password is re-verified against the encrypted vault before the key is shown:
  * an unlocked tab left unattended must not be enough to read a key out.
  *
- * The revealed key lives only in this component's state. It is masked by
- * default, dropped when the page unmounts, and once copied the screen reminds
- * the user that the secret is still sitting on the clipboard.
+ * The revealed key lives only in this component's state. While hidden the key
+ * text is blurred and non-selectable, with a reveal button laid over it; on
+ * reveal the button disappears and clicking the text again hides it. Once
+ * copied, the card itself reminds the user the secret is still on the clipboard.
  *
  * The index is read on the client with `useParams` so the page itself stays
  * prerenderable.
@@ -93,10 +91,6 @@ export function RevealPrivateKey() {
   }
 
   const backHref = `/accounts/${account.index}`;
-  const mainClassName =
-    clipboardState === "idle"
-      ? "page-main"
-      : "page-main page-main-with-notice";
 
   if (!privateKey) {
     return (
@@ -157,7 +151,7 @@ export function RevealPrivateKey() {
   }
 
   return (
-    <main className={mainClassName}>
+    <main className="page-main">
       <section className="security-warning" role="alert">
         <strong>Never share your private key.</strong> Anyone who has it gains
         full control of this account and can move all of its assets. No one —
@@ -182,32 +176,42 @@ export function RevealPrivateKey() {
         <h2 className="private-key-heading" id="private-key-heading">
           Private key
         </h2>
-        <p className="private-key-caution">
-          Make sure no one is watching your screen.
-        </p>
 
-        <div className="private-key-value-row">
+        {/*
+          The key text stays mounted in both states; the hidden state blurs it
+          and lays a reveal button over the top. A click on the box only hides
+          once the key is already revealed, so it never fights the button.
+        */}
+        <div
+          className="private-key-box"
+          onClick={() => {
+            if (isKeyVisible) setIsKeyVisible(false);
+          }}
+        >
           <code
-            aria-hidden={!isKeyVisible}
-            className="private-key-value"
-            data-masked={!isKeyVisible}
-            title={isKeyVisible ? privateKey : undefined}
+            className={
+              isKeyVisible
+                ? "private-key-value"
+                : "private-key-value is-hidden"
+            }
+            title={isKeyVisible ? "Click to hide" : undefined}
           >
-            {isKeyVisible ? privateKey : MASKED_KEY}
+            {privateKey}
           </code>
+          {!isKeyVisible ? (
+            <button
+              aria-label="Reveal private key"
+              className="private-key-reveal"
+              onClick={() => setIsKeyVisible(true)}
+              type="button"
+            >
+              <EyeIcon crossed={false} />
+              <span>Make sure no one is watching your screen.</span>
+            </button>
+          ) : null}
         </div>
 
-        <div className="private-key-actions">
-          <button
-            aria-label={isKeyVisible ? "Hide private key" : "Reveal private key"}
-            aria-pressed={isKeyVisible}
-            className="button button-outline"
-            onClick={() => setIsKeyVisible((visible) => !visible)}
-            type="button"
-          >
-            <EyeIcon crossed={isKeyVisible} />
-            {isKeyVisible ? "Hide" : "Tap to reveal"}
-          </button>
+        <div className="private-key-copy-row">
           <span className="private-key-copy">
             <CopyButton
               label="your private key"
@@ -217,30 +221,30 @@ export function RevealPrivateKey() {
             <span>Copy</span>
           </span>
         </div>
+
+        {clipboardState !== "idle" ? (
+          <div className="clipboard-notice" role="status">
+            {clipboardState === "warning" ? (
+              <>
+                <span>The sensitive information remains on your clipboard.</span>
+                <button
+                  className="button button-outline"
+                  onClick={() => void handleClearClipboard()}
+                  type="button"
+                >
+                  Clear clipboard
+                </button>
+              </>
+            ) : (
+              <span>Clipboard cleared.</span>
+            )}
+          </div>
+        ) : null}
       </section>
 
       <Link className="text-link back-link" href={backHref}>
         Back to account
       </Link>
-
-      {clipboardState !== "idle" ? (
-        <div className="clipboard-notice" role="status">
-          {clipboardState === "warning" ? (
-            <>
-              <span>The sensitive information remains on your clipboard.</span>
-              <button
-                className="button button-outline"
-                onClick={() => void handleClearClipboard()}
-                type="button"
-              >
-                Clear clipboard
-              </button>
-            </>
-          ) : (
-            <span>Clipboard cleared.</span>
-          )}
-        </div>
-      ) : null}
     </main>
   );
 }
