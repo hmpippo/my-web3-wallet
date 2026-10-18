@@ -16,12 +16,15 @@ import {
   MAX_ADDRESS_INDEX,
 } from "@/core/hd-wallet";
 import {
+  createWalletId,
   storageService,
   type NftStandard,
   type StoredWalletNft,
+  type StoredWalletSummary,
   type StoredWalletToken,
   type StorageService,
   type WalletAccountMetadata,
+  type WalletRegistry,
 } from "@/core/storage";
 import {
   createPrfSalt,
@@ -57,6 +60,8 @@ export interface WalletState {
   readonly address: Address | null;
   readonly accounts: readonly WalletAccount[];
   readonly selectedAccountIndex: number | null;
+  readonly wallets: readonly StoredWalletSummary[];
+  readonly selectedWalletId: string | null;
 }
 
 export interface WalletAccount {
@@ -154,6 +159,8 @@ export interface WalletServiceDependencies {
 }
 
 interface PendingWallet extends PreparedWallet {
+  id: string;
+  name: string;
   account: WalletAccount;
   privateKey: Hex;
   seed: Uint8Array;
@@ -167,7 +174,15 @@ export class WalletService {
     address: null,
     accounts: Object.freeze([]),
     selectedAccountIndex: null,
+    wallets: Object.freeze([]),
+    selectedWalletId: null,
   });
+  private registry: WalletRegistry = Object.freeze({
+    version: 1,
+    wallets: Object.freeze([]),
+    selectedId: null,
+  });
+  private registryLoaded = false;
   private pendingWallet: PendingWallet | null = null;
   private operationVersion = 0;
   private accountMutationVersion = 0;
@@ -234,19 +249,19 @@ export class WalletService {
 
   async prepareWallet(): Promise<PreparedWallet> {
     this.assertNoWalletCreationInProgress();
+    const registryVersion = this.operationVersion;
+    await this.ensureRegistry();
+    this.assertOperationCurrent(registryVersion);
     this.lock();
     const operationVersion = this.operationVersion;
-    if (await this.storage.hasVault()) {
-      this.assertOperationCurrent(operationVersion);
-      throw new Error("A wallet already exists on this device");
-    }
-    this.assertOperationCurrent(operationVersion);
 
     const mnemonic = generateMnemonic();
     const { account, seed } = await deriveAccountFromMnemonic(mnemonic, 0);
     try {
       this.assertOperationCurrent(operationVersion);
       this.pendingWallet = {
+        id: createWalletId(),
+        name: this.nextWalletName(),
         mnemonic,
         address: account.address,
         account: createWalletAccount(0, account.address),
@@ -280,15 +295,11 @@ export class WalletService {
     try {
       const vault = await encryptVault(pendingWallet.mnemonic, password);
       this.assertOperationCurrent(operationVersion);
-      if (await this.storage.hasVault()) {
-        throw new Error("A wallet already exists on this device");
-      }
-      this.assertOperationCurrent(operationVersion);
-      await this.storage.saveVault(vault);
+      await this.storage.saveVault(pendingWallet.id, vault);
       try {
         this.assertOperationCurrent(operationVersion);
         const account = pendingWallet.account;
-        await this.storage.saveAccountMetadata({
+        await this.storage.saveAccountMetadata(pendingWallet.id, {
           version: 1,
           accounts: [
             {
@@ -301,9 +312,18 @@ export class WalletService {
         });
         this.assertOperationCurrent(operationVersion);
       } catch (error) {
-        await this.storage.clearVault();
+        await this.storage.clearVault(pendingWallet.id);
         throw error;
       }
+
+      const registry = addWalletToRegistry(this.registry, {
+        id: pendingWallet.id,
+        name: pendingWallet.name,
+        createdAt: Date.now(),
+      });
+      await this.storage.saveRegistry(registry);
+      this.assertOperationCurrent(operationVersion);
+      this.registry = registry;
 
       this.activateWallet(pendingWallet.seed, [pendingWallet.account], 0, pendingWallet.privateKey);
       this.pendingWallet = null;
@@ -321,13 +341,11 @@ export class WalletService {
     if (!validateMnemonic(mnemonic)) {
       throw new Error("Invalid BIP-39 mnemonic");
     }
+    const registryVersion = this.operationVersion;
+    await this.ensureRegistry();
+    this.assertOperationCurrent(registryVersion);
     this.lock();
     const operationVersion = this.operationVersion;
-    if (await this.storage.hasVault()) {
-      this.assertOperationCurrent(operationVersion);
-      throw new Error("A wallet already exists on this device");
-    }
-    this.assertOperationCurrent(operationVersion);
 
     const normalizedMnemonic = mnemonic.trim().split(/\s+/).join(" ");
     const { account, seed } = await deriveAccountFromMnemonic(normalizedMnemonic, 0);
@@ -336,15 +354,13 @@ export class WalletService {
       this.assertOperationCurrent(operationVersion);
       const vault = await encryptVault(normalizedMnemonic, password);
       this.assertOperationCurrent(operationVersion);
-      if (await this.storage.hasVault()) {
-        throw new Error("A wallet already exists on this device");
-      }
-      this.assertOperationCurrent(operationVersion);
-      await this.storage.saveVault(vault);
+      const walletId = createWalletId();
+      const walletName = this.nextWalletName();
+      await this.storage.saveVault(walletId, vault);
       try {
         this.assertOperationCurrent(operationVersion);
         const walletAccount = createWalletAccount(0, account.address);
-        await this.storage.saveAccountMetadata({
+        await this.storage.saveAccountMetadata(walletId, {
           version: 1,
           accounts: [
             { path: walletAccount.path, name: walletAccount.name, hidden: false },
@@ -353,9 +369,17 @@ export class WalletService {
         });
         this.assertOperationCurrent(operationVersion);
       } catch (error) {
-        await this.storage.clearVault();
+        await this.storage.clearVault(walletId);
         throw error;
       }
+      const registry = addWalletToRegistry(this.registry, {
+        id: walletId,
+        name: walletName,
+        createdAt: Date.now(),
+      });
+      await this.storage.saveRegistry(registry);
+      this.assertOperationCurrent(operationVersion);
+      this.registry = registry;
       const walletAccount = createWalletAccount(0, account.address);
       this.activateWallet(seed, [walletAccount], 0, account.privateKey);
       seedTransferred = true;
@@ -369,7 +393,13 @@ export class WalletService {
     this.assertNoWalletCreationInProgress();
     this.lock();
     const operationVersion = this.operationVersion;
-    const vault = await this.storage.loadVault();
+    await this.ensureRegistry();
+    this.assertOperationCurrent(operationVersion);
+    const walletId = this.registry.selectedId;
+    if (!walletId) {
+      throw new Error("No wallet is stored on this device");
+    }
+    const vault = await this.storage.loadVault(walletId);
     this.assertOperationCurrent(operationVersion);
     if (!vault) {
       throw new Error("No wallet is stored on this device");
@@ -377,7 +407,7 @@ export class WalletService {
 
     const mnemonic = await decryptVault(vault, password);
     this.assertOperationCurrent(operationVersion);
-    await this.activateFromMnemonic(mnemonic, operationVersion);
+    await this.activateFromMnemonic(mnemonic, operationVersion, walletId);
   }
 
   /**
@@ -388,6 +418,7 @@ export class WalletService {
   private async activateFromMnemonic(
     mnemonic: string,
     operationVersion: number,
+    walletId: string,
   ): Promise<void> {
     if (!validateMnemonic(mnemonic)) {
       throw new Error("Stored vault does not contain a valid BIP-39 mnemonic");
@@ -396,7 +427,7 @@ export class WalletService {
     const { account, seed } = await deriveAccountFromMnemonic(mnemonic, 0);
     try {
       this.assertOperationCurrent(operationVersion);
-      const storedMetadata = await this.storage.loadAccountMetadata();
+      const storedMetadata = await this.storage.loadAccountMetadata(walletId);
       this.assertOperationCurrent(operationVersion);
       const metadata = storedMetadata ?? createDefaultMetadata();
       const selectedPath = resolveSelectedPath(metadata);
@@ -421,7 +452,7 @@ export class WalletService {
       }
 
       if (!storedMetadata || storedMetadata.selectedPath !== selectedPath) {
-        await this.storage.saveAccountMetadata({
+        await this.storage.saveAccountMetadata(walletId, {
           ...metadata,
           selectedPath,
         });
@@ -451,9 +482,12 @@ export class WalletService {
     this.pendingWallet = null;
   }
 
-  /** Whether a wrapped biometric vault exists on this device. */
+  /** Whether a wrapped biometric vault exists for the selected wallet. */
   async hasBiometricUnlock(): Promise<boolean> {
-    return (await this.storage.loadBiometricVault()) !== null;
+    await this.ensureRegistry();
+    const walletId = this.registry.selectedId;
+    if (!walletId) return false;
+    return (await this.storage.loadBiometricVault(walletId)) !== null;
   }
 
   /** Whether this browser can run a platform-authenticator ceremony. */
@@ -471,6 +505,10 @@ export class WalletService {
       throw new Error("Wallet is locked");
     }
     this.assertNoWalletCreationInProgress();
+    const walletId = this.registry.selectedId;
+    if (!walletId) {
+      throw new Error("No wallet is stored on this device");
+    }
     const operationVersion = this.operationVersion;
     const rpId = this.biometric.getRpId();
     if (!rpId) {
@@ -480,7 +518,7 @@ export class WalletService {
       throw new Error("Biometric unlock is not available on this device");
     }
 
-    const vault = await this.storage.loadVault();
+    const vault = await this.storage.loadVault(walletId);
     if (!vault) {
       throw new Error("No wallet is stored on this device");
     }
@@ -512,7 +550,7 @@ export class WalletService {
       prfOutput.fill(0);
     }
     this.assertOperationCurrent(operationVersion);
-    await this.storage.saveBiometricVault(biometricVault);
+    await this.storage.saveBiometricVault(walletId, biometricVault);
   }
 
   /**
@@ -520,7 +558,10 @@ export class WalletService {
    * keychain; the user removes it there if they want it gone entirely.
    */
   async disableBiometricUnlock(): Promise<void> {
-    await this.storage.clearBiometricVault();
+    await this.ensureRegistry();
+    const walletId = this.registry.selectedId;
+    if (!walletId) return;
+    await this.storage.clearBiometricVault(walletId);
   }
 
   /**
@@ -532,7 +573,13 @@ export class WalletService {
     this.assertNoWalletCreationInProgress();
     this.lock();
     const operationVersion = this.operationVersion;
-    const vault = await this.storage.loadBiometricVault();
+    await this.ensureRegistry();
+    this.assertOperationCurrent(operationVersion);
+    const walletId = this.registry.selectedId;
+    if (!walletId) {
+      throw new Error("No wallet is stored on this device");
+    }
+    const vault = await this.storage.loadBiometricVault(walletId);
     this.assertOperationCurrent(operationVersion);
     if (!vault) {
       throw new Error("Biometric unlock is not set up on this device");
@@ -558,11 +605,122 @@ export class WalletService {
       prfOutput.fill(0);
     }
     this.assertOperationCurrent(operationVersion);
-    await this.activateFromMnemonic(mnemonic, operationVersion);
+    await this.activateFromMnemonic(mnemonic, operationVersion, walletId);
   }
 
   getAddress(): Address | null {
     return this.state.address;
+  }
+
+  /**
+   * Reloads the wallet registry from storage. The list and selection are public
+   * metadata (no key material), so they can be read while locked; the wallet
+   * manager and the unlock screen call this on mount.
+   */
+  async refreshWallets(): Promise<void> {
+    const registry = (await this.storage.loadRegistry()) ?? emptyRegistry();
+    this.registry = registry;
+    this.registryLoaded = true;
+    this.updateState(
+      this.state.isUnlocked,
+      this.state.accounts,
+      this.state.selectedAccountIndex,
+    );
+  }
+
+  /**
+   * Selects which wallet the UI targets for unlock. Switching away from the
+   * unlocked wallet locks the session, because every wallet has its own
+   * password.
+   */
+  async selectWallet(walletId: string): Promise<void> {
+    await this.ensureRegistry();
+    if (!this.registry.wallets.some((wallet) => wallet.id === walletId)) {
+      throw new RangeError("Wallet does not exist on this device");
+    }
+    if (this.registry.selectedId === walletId) return;
+    if (this.state.isUnlocked) this.lock();
+    const registry: WalletRegistry = Object.freeze({
+      ...this.registry,
+      selectedId: walletId,
+    });
+    await this.storage.saveRegistry(registry);
+    this.registry = registry;
+    this.updateState(false, [], null);
+  }
+
+  /** Renames a wallet. The name is cosmetic and never touches the vault. */
+  async renameWallet(walletId: string, name: string): Promise<void> {
+    await this.ensureRegistry();
+    if (!this.registry.wallets.some((wallet) => wallet.id === walletId)) {
+      throw new RangeError("Wallet does not exist on this device");
+    }
+    const normalizedName = name.trim();
+    if (normalizedName.length === 0 || normalizedName.length > 32) {
+      throw new RangeError("Wallet name must be between 1 and 32 characters");
+    }
+    const registry: WalletRegistry = Object.freeze({
+      ...this.registry,
+      wallets: this.registry.wallets.map((wallet) =>
+        wallet.id === walletId ? { ...wallet, name: normalizedName } : wallet,
+      ),
+    });
+    await this.storage.saveRegistry(registry);
+    this.registry = registry;
+    this.updateState(
+      this.state.isUnlocked,
+      this.state.accounts,
+      this.state.selectedAccountIndex,
+    );
+  }
+
+  /**
+   * Deletes a wallet after re-verifying its password, wiping its vault, account
+   * metadata, and biometric enrollment. Re-checking the password means an
+   * unattended unlocked tab cannot destroy a wallet by a single click. If the
+   * deleted wallet held the active session it is locked, and the selection moves
+   * to a remaining wallet.
+   */
+  async deleteWallet(walletId: string, password: string): Promise<void> {
+    await this.ensureRegistry();
+    if (!this.registry.wallets.some((wallet) => wallet.id === walletId)) {
+      throw new RangeError("Wallet does not exist on this device");
+    }
+    const vault = await this.storage.loadVault(walletId);
+    if (!vault) {
+      throw new Error("No wallet is stored on this device");
+    }
+    // A wrong password throws before anything is destroyed.
+    await decryptVault(vault, password);
+
+    const wasActive =
+      this.state.isUnlocked && this.registry.selectedId === walletId;
+    await this.storage.clearVault(walletId);
+
+    const wallets = this.registry.wallets.filter(
+      (wallet) => wallet.id !== walletId,
+    );
+    const selectedId =
+      this.registry.selectedId === walletId
+        ? (wallets[0]?.id ?? null)
+        : this.registry.selectedId;
+    const registry: WalletRegistry = Object.freeze({
+      version: 1,
+      wallets: Object.freeze(wallets),
+      selectedId,
+    });
+    await this.storage.saveRegistry(registry);
+    this.registry = registry;
+
+    if (wasActive) {
+      this.lock();
+    } else {
+      this.updateState(
+        this.state.isUnlocked,
+        this.state.accounts,
+        this.state.selectedAccountIndex,
+      );
+    }
   }
 
   /**
@@ -585,7 +743,11 @@ export class WalletService {
       throw new RangeError("Account does not exist in this wallet session");
     }
 
-    const vault = await this.storage.loadVault();
+    const walletId = this.registry.selectedId;
+    if (!walletId) {
+      throw new Error("No wallet is stored on this device");
+    }
+    const vault = await this.storage.loadVault(walletId);
     if (!vault) {
       throw new Error("No wallet is stored on this device");
     }
@@ -1159,6 +1321,31 @@ export class WalletService {
     }
   }
 
+  /**
+   * Loads the wallet registry once per service lifetime. Lazy so the service
+   * stays constructible outside a browser (the server has no `localStorage`)
+   * and so tests can inject a fake storage.
+   */
+  private async ensureRegistry(): Promise<void> {
+    if (this.registryLoaded) return;
+    const registry = (await this.storage.loadRegistry()) ?? emptyRegistry();
+    this.registry = registry;
+    this.registryLoaded = true;
+    this.updateState(
+      this.state.isUnlocked,
+      this.state.accounts,
+      this.state.selectedAccountIndex,
+    );
+  }
+
+  /** The next free `Wallet N` name, so defaults never collide after a delete. */
+  private nextWalletName(): string {
+    const used = new Set(this.registry.wallets.map((wallet) => wallet.name));
+    let index = 1;
+    while (used.has(`Wallet ${index}`)) index += 1;
+    return `Wallet ${index}`;
+  }
+
   private async assertNftOwned(
     address: Address,
     tokenId: bigint,
@@ -1217,7 +1404,9 @@ export class WalletService {
       (account) => account.index === selectedIndex && !account.hidden,
     );
     if (!selected) throw new Error("Select a visible account before saving");
-    await this.storage.saveAccountMetadata({
+    const walletId = this.registry.selectedId;
+    if (!walletId) throw new Error("Wallet is locked");
+    await this.storage.saveAccountMetadata(walletId, {
       version: 1,
       accounts: accounts.map(({ path, name, hidden, tokens, nfts }) => ({
         path,
@@ -1258,6 +1447,14 @@ export class WalletService {
       this.state.isUnlocked === isUnlocked &&
       this.state.address === address &&
       this.state.selectedAccountIndex === selectedAccountIndex &&
+      this.state.selectedWalletId === this.registry.selectedId &&
+      this.state.wallets.length === this.registry.wallets.length &&
+      this.state.wallets.every(
+        (wallet, index) =>
+          wallet.id === this.registry.wallets[index]?.id &&
+          wallet.name === this.registry.wallets[index]?.name &&
+          wallet.createdAt === this.registry.wallets[index]?.createdAt,
+      ) &&
       this.state.accounts.length === accounts.length &&
       this.state.accounts.every(
         (account, index) =>
@@ -1292,6 +1489,10 @@ export class WalletService {
       address,
       accounts: frozenAccounts,
       selectedAccountIndex,
+      wallets: Object.freeze(
+        this.registry.wallets.map((wallet) => Object.freeze({ ...wallet })),
+      ),
+      selectedWalletId: this.registry.selectedId,
     });
     for (const listener of this.listeners) listener();
   }
@@ -1309,6 +1510,25 @@ async function deriveAccountFromMnemonic(mnemonic: string, index: number) {
 
 function nftIdentity(nft: StoredWalletNft): string {
   return `${nft.chainId}:${nft.address.toLowerCase()}:${nft.tokenId}:${nft.standard}`;
+}
+
+function emptyRegistry(): WalletRegistry {
+  return Object.freeze({
+    version: 1,
+    wallets: Object.freeze([]),
+    selectedId: null,
+  });
+}
+
+function addWalletToRegistry(
+  registry: WalletRegistry,
+  wallet: StoredWalletSummary,
+): WalletRegistry {
+  return Object.freeze({
+    version: 1,
+    wallets: Object.freeze([...registry.wallets, wallet]),
+    selectedId: wallet.id,
+  });
 }
 
 /** Tokens stored for one account on one chain. */

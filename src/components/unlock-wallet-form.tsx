@@ -2,17 +2,57 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useState,
+  useSyncExternalStore,
+  type FormEvent,
+} from "react";
 import { walletService } from "@/services/wallet-service";
 
 export function UnlockWalletForm() {
   const router = useRouter();
+  const walletState = useSyncExternalStore(
+    walletService.subscribe,
+    () => walletService.getState(),
+    () => walletService.getState(),
+  );
+  const wallets = walletState.wallets;
+  const selectedWallet = wallets.find(
+    (wallet) => wallet.id === walletState.selectedWalletId,
+  );
+
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [biometricLabel, setBiometricLabel] = useState<string | null>(null);
+  const [isRegistryLoaded, setIsRegistryLoaded] = useState(false);
 
+  // Load the registry. It is public metadata, so it can be read while locked.
+  useEffect(() => {
+    let active = true;
+    void walletService
+      .refreshWallets()
+      .catch(() => undefined)
+      .finally(() => {
+        if (active) setIsRegistryLoaded(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Once the registry has loaded, a device with no wallets has nothing to
+  // unlock: send the user back to the manager.
+  useEffect(() => {
+    if (isRegistryLoaded && wallets.length === 0) {
+      router.replace("/");
+    }
+  }, [isRegistryLoaded, wallets.length, router]);
+
+  // Probe biometric availability for the currently selected wallet. A passkey
+  // enrollment is per wallet, so switching wallets re-checks it.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -23,15 +63,30 @@ export function UnlockWalletForm() {
         ]);
         if (!cancelled && enrolled && supported) {
           setBiometricLabel(getBiometricLabel());
+        } else if (!cancelled) {
+          setBiometricLabel(null);
         }
       } catch {
-        // The biometric probe is best-effort; password unlock always works.
+        if (!cancelled) setBiometricLabel(null);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [walletState.selectedWalletId]);
+
+  async function handleWalletChange(walletId: string) {
+    setError(null);
+    setPassword("");
+    setBiometricLabel(null);
+    try {
+      await walletService.selectWallet(walletId);
+    } catch (caught) {
+      setError(
+        caught instanceof Error ? caught.message : "Could not switch wallets.",
+      );
+    }
+  }
 
   async function unlockWithBiometric() {
     setError(null);
@@ -73,10 +128,29 @@ export function UnlockWalletForm() {
   return (
     <section className="form-card" aria-labelledby="unlock-title">
       <p className="eyebrow">Welcome back</p>
-      <h1 id="unlock-title">Unlock your wallet</h1>
+      <h1 id="unlock-title">
+        {selectedWallet ? `Unlock ${selectedWallet.name}` : "Unlock your wallet"}
+      </h1>
       <p className="muted-copy">
-        Enter the password you chose for this device.
+        Enter the password you chose for this wallet on this device.
       </p>
+
+      {wallets.length > 1 ? (
+        <div className="account-controls">
+          <label htmlFor="unlock-wallet">Wallet</label>
+          <select
+            id="unlock-wallet"
+            onChange={(event) => void handleWalletChange(event.target.value)}
+            value={walletState.selectedWalletId ?? ""}
+          >
+            {wallets.map((wallet) => (
+              <option key={wallet.id} value={wallet.id}>
+                {wallet.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
 
       {biometricLabel ? (
         <div className="biometric-unlock">

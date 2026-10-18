@@ -6,6 +6,7 @@ import { decodeBase64 } from "@/lib/base64";
 import type {
   StorageService,
   WalletAccountMetadata,
+  WalletRegistry,
 } from "@/core/storage";
 import { WalletService, type BiometricUnlockProvider } from "./wallet-service";
 
@@ -13,6 +14,7 @@ const TEST_MNEMONIC =
   "test test test test test test test test test test test junk";
 const EXPECTED_ADDRESS = "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266";
 const SECOND_ADDRESS = "0x70997970C51812dc3A010C7d01b50e0d17dc79C8";
+const DEFAULT_WALLET_ID = "wallet-test-1";
 const LOCKED_STATE = {
   isUnlocked: false,
   address: null,
@@ -21,43 +23,78 @@ const LOCKED_STATE = {
 };
 const SEPOLIA = 11155111;
 
+function seedRegistry(): WalletRegistry {
+  return {
+    version: 1,
+    wallets: [{ id: DEFAULT_WALLET_ID, name: "Wallet 1", createdAt: 0 }],
+    selectedId: DEFAULT_WALLET_ID,
+  };
+}
+
 function createStorage(
   initialVault: EncryptedVault | null = null,
   initialMetadata: WalletAccountMetadata | null = null,
   initialBiometricVault: BiometricVault | null = null,
+  initialRegistry: WalletRegistry | null = null,
 ) {
-  let vault = initialVault;
-  let accountMetadata = initialMetadata;
-  let biometricVault = initialBiometricVault;
+  const vaults = new Map<string, EncryptedVault>();
+  const accountMetadata = new Map<string, WalletAccountMetadata>();
+  const biometricVaults = new Map<string, BiometricVault>();
+  // A pre-seeded vault belongs to a registered wallet, matching the real
+  // invariant that key material is only reachable through the registry.
+  let registry =
+    initialRegistry ??
+    (initialVault || initialMetadata || initialBiometricVault
+      ? seedRegistry()
+      : null);
+  if (initialVault) vaults.set(DEFAULT_WALLET_ID, initialVault);
+  if (initialMetadata) accountMetadata.set(DEFAULT_WALLET_ID, initialMetadata);
+  if (initialBiometricVault) {
+    biometricVaults.set(DEFAULT_WALLET_ID, initialBiometricVault);
+  }
   const storage: StorageService = {
-    saveVault: vi.fn(async (value) => {
-      vault = value;
+    saveRegistry: vi.fn(async (value) => {
+      registry = value;
     }),
-    loadVault: vi.fn(async () => vault),
-    clearVault: vi.fn(async () => {
-      vault = null;
+    loadRegistry: vi.fn(async () => registry),
+    clearRegistry: vi.fn(async () => {
+      registry = null;
     }),
-    hasVault: vi.fn(async () => vault !== null),
-    saveAccountMetadata: vi.fn(async (value) => {
-      accountMetadata = value;
+    saveVault: vi.fn(async (walletId, value) => {
+      vaults.set(walletId, value);
     }),
-    loadAccountMetadata: vi.fn(async () => accountMetadata),
-    clearAccountMetadata: vi.fn(async () => {
-      accountMetadata = null;
+    loadVault: vi.fn(async (walletId) => vaults.get(walletId) ?? null),
+    clearVault: vi.fn(async (walletId) => {
+      vaults.delete(walletId);
+      accountMetadata.delete(walletId);
+      biometricVaults.delete(walletId);
     }),
-    saveBiometricVault: vi.fn(async (value) => {
-      biometricVault = value;
+    hasVault: vi.fn(async (walletId) => vaults.has(walletId)),
+    saveAccountMetadata: vi.fn(async (walletId, value) => {
+      accountMetadata.set(walletId, value);
     }),
-    loadBiometricVault: vi.fn(async () => biometricVault),
-    clearBiometricVault: vi.fn(async () => {
-      biometricVault = null;
+    loadAccountMetadata: vi.fn(
+      async (walletId) => accountMetadata.get(walletId) ?? null,
+    ),
+    clearAccountMetadata: vi.fn(async (walletId) => {
+      accountMetadata.delete(walletId);
+    }),
+    saveBiometricVault: vi.fn(async (walletId, value) => {
+      biometricVaults.set(walletId, value);
+    }),
+    loadBiometricVault: vi.fn(
+      async (walletId) => biometricVaults.get(walletId) ?? null,
+    ),
+    clearBiometricVault: vi.fn(async (walletId) => {
+      biometricVaults.delete(walletId);
     }),
   };
   return {
     storage,
-    getVault: () => vault,
-    getAccountMetadata: () => accountMetadata,
-    getBiometricVault: () => biometricVault,
+    getVault: () => [...vaults.values()][0] ?? null,
+    getAccountMetadata: () => [...accountMetadata.values()][0] ?? null,
+    getBiometricVault: () => [...biometricVaults.values()][0] ?? null,
+    getRegistry: () => registry,
   };
 }
 
@@ -70,7 +107,7 @@ describe("WalletService", () => {
     const prepared = await service.prepareWallet();
 
     expect(prepared.mnemonic.split(" ")).toHaveLength(12);
-    expect(service.getState()).toEqual(LOCKED_STATE);
+    expect(service.getState()).toMatchObject(LOCKED_STATE);
     expect(getVault()).toBeNull();
 
     await expect(service.createWallet("correct horse", false)).rejects.toThrow(
@@ -80,7 +117,7 @@ describe("WalletService", () => {
 
     const created = await service.createWallet("correct horse", true);
     expect(created).toEqual(prepared);
-    expect(service.getState()).toEqual({
+    expect(service.getState()).toMatchObject({
       isUnlocked: true,
       address: prepared.address,
       accounts: [
@@ -123,7 +160,7 @@ describe("WalletService", () => {
 
     service.lock();
     expect(listener).toHaveBeenCalledTimes(2);
-    expect(service.getState()).toEqual(LOCKED_STATE);
+    expect(service.getState()).toMatchObject(LOCKED_STATE);
     unsubscribe();
   });
 
@@ -151,9 +188,9 @@ describe("WalletService", () => {
     expect(JSON.stringify(getVault())).not.toContain(TEST_MNEMONIC);
 
     service.lock();
-    expect(service.getState()).toEqual(LOCKED_STATE);
+    expect(service.getState()).toMatchObject(LOCKED_STATE);
     await service.unlock("correct horse");
-    expect(service.getState()).toEqual({
+    expect(service.getState()).toMatchObject({
       isUnlocked: true,
       address: EXPECTED_ADDRESS,
       accounts: [
@@ -171,22 +208,20 @@ describe("WalletService", () => {
     });
   });
 
-  it("rejects invalid phrases and does not overwrite an existing vault", async () => {
-    const { storage } = createStorage({
-      version: 1,
-      salt: "c2FsdA==",
-      iv: "aXY=",
-      ciphertext: "Y2lwaGVydGV4dA==",
-    });
+  it("rejects invalid phrases and keeps existing wallets when adding another", async () => {
+    const vault = await encryptVault(TEST_MNEMONIC, "correct horse");
+    const { storage, getRegistry } = createStorage(vault);
     const service = new WalletService({ storage });
 
     await expect(
       service.importWallet("not a valid phrase", "correct horse"),
     ).rejects.toThrow("Invalid BIP-39 mnemonic");
-    await expect(service.prepareWallet()).rejects.toThrow(
-      "A wallet already exists",
-    );
     expect(storage.saveVault).not.toHaveBeenCalled();
+
+    // Importing a valid phrase adds a second wallet next to the existing one.
+    await service.importWallet(TEST_MNEMONIC, "a different password");
+    expect(getRegistry()?.wallets).toHaveLength(2);
+    expect(service.getAddress()).toBe(EXPECTED_ADDRESS);
   });
 
   it("fails to unlock for a wrong password and stays locked", async () => {
@@ -196,7 +231,7 @@ describe("WalletService", () => {
     await expect(service.unlock("wrong password")).rejects.toThrow(
       "Unable to decrypt vault",
     );
-    expect(service.getState()).toEqual(LOCKED_STATE);
+    expect(service.getState()).toMatchObject(LOCKED_STATE);
   });
 
   it("fails when no vault exists", async () => {
@@ -281,32 +316,16 @@ describe("WalletService", () => {
   });
 
   it("does not unlock after an in-flight unlock is cancelled by lock", async () => {
-    let resolveLoad: ((vault: EncryptedVault | null) => void) | undefined;
-    const storage: StorageService = {
-      saveVault: vi.fn(async () => undefined),
-      loadVault: vi.fn(
-        () =>
-          new Promise<EncryptedVault | null>((resolve) => {
-            resolveLoad = resolve;
-          }),
-      ),
-      clearVault: vi.fn(async () => undefined),
-      hasVault: vi.fn(async () => true),
-      saveAccountMetadata: vi.fn(async () => undefined),
-      loadAccountMetadata: vi.fn(async () => null),
-      clearAccountMetadata: vi.fn(async () => undefined),
-      saveBiometricVault: vi.fn(async () => undefined),
-      loadBiometricVault: vi.fn(async () => null),
-      clearBiometricVault: vi.fn(async () => undefined),
-    };
+    const { storage } = createStorage(
+      await encryptVault(TEST_MNEMONIC, "correct horse"),
+    );
     const service = new WalletService({ storage });
     const unlockPromise = service.unlock("correct horse");
 
     service.lock();
-    resolveLoad?.(null);
 
     await expect(unlockPromise).rejects.toThrow("Wallet operation was cancelled");
-    expect(service.getState()).toEqual(LOCKED_STATE);
+    expect(service.getState()).toMatchObject(LOCKED_STATE);
   });
 
   it("persists accounts and selected account across lock and unlock", async () => {
@@ -324,7 +343,7 @@ describe("WalletService", () => {
       tokens: [],
       nfts: [],
     });
-    expect(service.getState()).toEqual({
+    expect(service.getState()).toMatchObject({
       isUnlocked: true,
       address: SECOND_ADDRESS,
       accounts: [
@@ -349,9 +368,9 @@ describe("WalletService", () => {
     expect(getAccountMetadata()?.selectedPath).toBe("m/44'/60'/0'/0/1");
 
     service.lock();
-    expect(service.getState()).toEqual(LOCKED_STATE);
+    expect(service.getState()).toMatchObject(LOCKED_STATE);
     await service.unlock("correct horse");
-    expect(service.getState()).toEqual({
+    expect(service.getState()).toMatchObject({
       isUnlocked: true,
       address: SECOND_ADDRESS,
       accounts: [
@@ -1050,58 +1069,22 @@ describe("WalletService", () => {
     );
   });
 
-  it("cancels wallet preparation when locked while checking storage", async () => {
-    let resolveHasVault: ((hasVault: boolean) => void) | undefined;
-    const storage: StorageService = {
-      saveVault: vi.fn(async () => undefined),
-      loadVault: vi.fn(async () => null),
-      clearVault: vi.fn(async () => undefined),
-      hasVault: vi.fn(
-        () =>
-          new Promise<boolean>((resolve) => {
-            resolveHasVault = resolve;
-          }),
-      ),
-      saveAccountMetadata: vi.fn(async () => undefined),
-      loadAccountMetadata: vi.fn(async () => null),
-      clearAccountMetadata: vi.fn(async () => undefined),
-      saveBiometricVault: vi.fn(async () => undefined),
-      loadBiometricVault: vi.fn(async () => null),
-      clearBiometricVault: vi.fn(async () => undefined),
-    };
+  it("cancels wallet preparation when locked while loading the registry", async () => {
+    const { storage } = createStorage();
     const service = new WalletService({ storage });
     const preparation = service.prepareWallet();
 
     service.lock();
-    resolveHasVault?.(false);
 
     await expect(preparation).rejects.toThrow("Wallet operation was cancelled");
   });
 
-  it("cancels wallet import when locked while checking storage", async () => {
-    let resolveHasVault: ((hasVault: boolean) => void) | undefined;
-    const storage: StorageService = {
-      saveVault: vi.fn(async () => undefined),
-      loadVault: vi.fn(async () => null),
-      clearVault: vi.fn(async () => undefined),
-      hasVault: vi.fn(
-        () =>
-          new Promise<boolean>((resolve) => {
-            resolveHasVault = resolve;
-          }),
-      ),
-      saveAccountMetadata: vi.fn(async () => undefined),
-      loadAccountMetadata: vi.fn(async () => null),
-      clearAccountMetadata: vi.fn(async () => undefined),
-      saveBiometricVault: vi.fn(async () => undefined),
-      loadBiometricVault: vi.fn(async () => null),
-      clearBiometricVault: vi.fn(async () => undefined),
-    };
+  it("cancels wallet import when locked while loading the registry", async () => {
+    const { storage } = createStorage();
     const service = new WalletService({ storage });
     const importing = service.importWallet(TEST_MNEMONIC, "correct horse");
 
     service.lock();
-    resolveHasVault?.(false);
 
     await expect(importing).rejects.toThrow("Wallet operation was cancelled");
     expect(storage.saveVault).not.toHaveBeenCalled();
@@ -1117,7 +1100,7 @@ describe("WalletService", () => {
     await expect(
       service.importWallet(TEST_MNEMONIC, "correct horse"),
     ).rejects.toThrow("Storage unavailable");
-    expect(service.getState()).toEqual(LOCKED_STATE);
+    expect(service.getState()).toMatchObject(LOCKED_STATE);
   });
 
   it("does not unlock when the encrypted vault cannot be saved after backup", async () => {
@@ -1131,7 +1114,118 @@ describe("WalletService", () => {
     await expect(
       service.createWallet("correct horse", true),
     ).rejects.toThrow("Storage unavailable");
-    expect(service.getState()).toEqual(LOCKED_STATE);
+    expect(service.getState()).toMatchObject(LOCKED_STATE);
+  });
+});
+
+describe("WalletService multi-wallet", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("registers each created or imported wallet with a default name", async () => {
+    const { storage, getRegistry } = createStorage();
+    const service = new WalletService({ storage });
+
+    await service.importWallet(TEST_MNEMONIC, "first password");
+    await service.importWallet(TEST_MNEMONIC, "second password");
+
+    expect(service.getState().wallets.map((wallet) => wallet.name)).toEqual([
+      "Wallet 1",
+      "Wallet 2",
+    ]);
+    expect(getRegistry()?.wallets).toHaveLength(2);
+    // The most recently added wallet becomes the selected session.
+    expect(service.getState().selectedWalletId).toBe(getRegistry()?.selectedId);
+  });
+
+  it("keeps per-wallet passwords and unlocks only the selected wallet", async () => {
+    const { storage } = createStorage();
+    const service = new WalletService({ storage });
+
+    await service.importWallet(TEST_MNEMONIC, "first password");
+    const firstId = service.getState().selectedWalletId;
+    await service.importWallet(TEST_MNEMONIC, "second password");
+    const secondId = service.getState().selectedWalletId;
+    expect(firstId).not.toBeNull();
+    expect(firstId).not.toBe(secondId);
+
+    service.lock();
+    await expect(service.unlock("first password")).rejects.toThrow(
+      "Unable to decrypt vault",
+    );
+
+    await service.selectWallet(firstId!);
+    await service.unlock("first password");
+    expect(service.getAddress()).toBe(EXPECTED_ADDRESS);
+
+    // Switching wallets while unlocked drops the session: each has its own
+    // password, so the next one must be unlocked on its own.
+    expect(service.isUnlocked).toBe(true);
+    await service.selectWallet(secondId!);
+    expect(service.isUnlocked).toBe(false);
+  });
+
+  it("renames a wallet and persists the name across a reload", async () => {
+    const { storage } = createStorage();
+    const service = new WalletService({ storage });
+    await service.importWallet(TEST_MNEMONIC, "correct horse");
+    const walletId = service.getState().selectedWalletId!;
+
+    await service.renameWallet(walletId, "  Savings  ");
+    expect(service.getState().wallets[0]?.name).toBe("Savings");
+
+    await expect(service.renameWallet(walletId, "   ")).rejects.toThrow(
+      "between 1 and 32 characters",
+    );
+
+    const reloaded = new WalletService({ storage });
+    await reloaded.refreshWallets();
+    expect(reloaded.getState().wallets[0]?.name).toBe("Savings");
+  });
+
+  it("deletes a wallet only after verifying its password", async () => {
+    const { storage, getRegistry } = createStorage();
+    const service = new WalletService({ storage });
+    await service.importWallet(TEST_MNEMONIC, "correct horse");
+    const walletId = service.getState().selectedWalletId!;
+
+    await expect(
+      service.deleteWallet(walletId, "wrong password"),
+    ).rejects.toThrow("Unable to decrypt vault");
+    expect(getRegistry()?.wallets).toHaveLength(1);
+
+    await service.deleteWallet(walletId, "correct horse");
+    expect(service.getState().wallets).toHaveLength(0);
+    expect(service.getState().selectedWalletId).toBeNull();
+    // The active session is dropped along with the wallet.
+    expect(service.isUnlocked).toBe(false);
+    await expect(storage.loadVault(walletId)).resolves.toBeNull();
+  });
+
+  it("keeps the unlocked session when another wallet is deleted", async () => {
+    const { storage, getRegistry } = createStorage();
+    const service = new WalletService({ storage });
+    await service.importWallet(TEST_MNEMONIC, "first password");
+    const firstId = service.getState().selectedWalletId!;
+    await service.importWallet(TEST_MNEMONIC, "second password");
+
+    await service.deleteWallet(firstId, "first password");
+
+    expect(getRegistry()?.wallets).toHaveLength(1);
+    expect(service.isUnlocked).toBe(true);
+    expect(service.getAddress()).toBe(EXPECTED_ADDRESS);
+  });
+
+  it("exposes the registry while locked for the manager screen", async () => {
+    const { storage } = createStorage();
+    const created = new WalletService({ storage });
+    await created.importWallet(TEST_MNEMONIC, "correct horse");
+
+    const fresh = new WalletService({ storage });
+    expect(fresh.getState().wallets).toEqual([]);
+    await fresh.refreshWallets();
+    expect(fresh.getState().wallets).toHaveLength(1);
+    expect(fresh.getState().selectedWalletId).not.toBeNull();
+    expect(fresh.isUnlocked).toBe(false);
   });
 });
 
@@ -1197,7 +1291,7 @@ describe("WalletService biometric unlock", () => {
     });
 
     service.lock();
-    expect(service.getState()).toEqual(LOCKED_STATE);
+    expect(service.getState()).toMatchObject(LOCKED_STATE);
     await service.unlockWithBiometric();
     expect(service.getAddress()).toBe(EXPECTED_ADDRESS);
   });
@@ -1236,13 +1330,22 @@ describe("WalletService biometric unlock", () => {
     expect(biometric.register).not.toHaveBeenCalled();
   });
 
-  it("fails when biometric unlock is not set up", async () => {
-    const service = new WalletService({
+  it("fails when no wallet is selected or biometric unlock is not set up", async () => {
+    const empty = new WalletService({
       storage: createStorage().storage,
       biometric: createBiometricProvider(),
     });
+    await expect(empty.unlockWithBiometric()).rejects.toThrow(
+      "No wallet is stored",
+    );
 
-    await expect(service.unlockWithBiometric()).rejects.toThrow("not set up");
+    const seeded = new WalletService({
+      storage: createStorage(
+        await encryptVault(TEST_MNEMONIC, "correct horse"),
+      ).storage,
+      biometric: createBiometricProvider(),
+    });
+    await expect(seeded.unlockWithBiometric()).rejects.toThrow("not set up");
   });
 
   it("rejects a wrapped vault from another origin", async () => {
@@ -1279,7 +1382,7 @@ describe("WalletService biometric unlock", () => {
     await expect(service.unlockWithBiometric()).rejects.toThrow(
       "Unable to decrypt the biometric vault",
     );
-    expect(service.getState()).toEqual(LOCKED_STATE);
+    expect(service.getState()).toMatchObject(LOCKED_STATE);
   });
 
   it("reports and clears the local enrollment", async () => {

@@ -36,6 +36,9 @@ export function WalletDashboard() {
       : "tokens";
   });
   const visibleAccounts = walletState.accounts.filter((account) => !account.hidden);
+  const selectedWallet = walletState.wallets.find(
+    (wallet) => wallet.id === walletState.selectedWalletId,
+  );
   const selectedAccount = walletState.accounts.find(
     (account) => account.index === walletState.selectedAccountIndex,
   );
@@ -75,10 +78,15 @@ export function WalletDashboard() {
     <main className="page-main">
       <section className="page-heading dashboard-heading">
         <div>
-          <p className="eyebrow">{chain.name} wallet</p>
+          <p className="eyebrow">
+            {selectedWallet ? selectedWallet.name : "Your wallet"} · {chain.name}
+          </p>
           <h1>Your wallet</h1>
         </div>
         <div className="dashboard-heading-actions">
+          <Link className="text-link" href="/">
+            Wallets
+          </Link>
           <Link className="text-link" href="/settings">
             Settings
           </Link>

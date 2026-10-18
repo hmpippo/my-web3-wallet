@@ -4,10 +4,17 @@ import {
   BIOMETRIC_VAULT_STORAGE_KEY,
   storageService,
   VAULT_STORAGE_KEY,
+  WALLET_REGISTRY_STORAGE_KEY,
+  walletAccountMetadataKey,
+  walletBiometricVaultKey,
+  walletVaultKey,
   type WalletAccountMetadata,
+  type WalletRegistry,
 } from "./storage";
 import type { EncryptedVault } from "./crypto";
 import type { BiometricVault } from "./biometric-vault";
+
+const WALLET_ID = "wallet-test-1";
 
 const testVault: EncryptedVault = {
   version: 1,
@@ -64,6 +71,13 @@ const testAccountMetadata: WalletAccountMetadata = {
   ],
   selectedPath: "m/44'/60'/0'/0/2",
 };
+const testRegistry: WalletRegistry = {
+  version: 1,
+  wallets: [
+    { id: WALLET_ID, name: "Spending", createdAt: 1_700_000_000_000 },
+  ],
+  selectedId: WALLET_ID,
+};
 
 function createLocalStorageMock() {
   const store = new Map<string, string>();
@@ -77,75 +91,99 @@ function createLocalStorageMock() {
 describe("vault storage", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("saves and loads only the encrypted vault under the fixed key", async () => {
+  it("saves and loads the encrypted vault under the wallet-scoped key", async () => {
     const localStorage = createLocalStorageMock();
     vi.stubGlobal("window", { localStorage });
 
-    await storageService.saveVault(testVault);
+    await storageService.saveVault(WALLET_ID, testVault);
 
     expect(localStorage.setItem).toHaveBeenCalledWith(
-      VAULT_STORAGE_KEY,
+      walletVaultKey(WALLET_ID),
       JSON.stringify(testVault),
     );
-    await expect(storageService.loadVault()).resolves.toEqual(testVault);
-    await expect(storageService.hasVault()).resolves.toBe(true);
+    await expect(storageService.loadVault(WALLET_ID)).resolves.toEqual(
+      testVault,
+    );
+    await expect(storageService.hasVault(WALLET_ID)).resolves.toBe(true);
+  });
+
+  it("keeps wallets isolated by id", async () => {
+    vi.stubGlobal("window", { localStorage: createLocalStorageMock() });
+
+    await storageService.saveVault(WALLET_ID, testVault);
+
+    await expect(storageService.loadVault("other-wallet")).resolves.toBeNull();
+    await expect(storageService.hasVault("other-wallet")).resolves.toBe(false);
   });
 
   it("returns null when no vault has been saved", async () => {
     vi.stubGlobal("window", { localStorage: createLocalStorageMock() });
 
-    await expect(storageService.loadVault()).resolves.toBeNull();
-    await expect(storageService.hasVault()).resolves.toBe(false);
+    await expect(storageService.loadVault(WALLET_ID)).resolves.toBeNull();
+    await expect(storageService.hasVault(WALLET_ID)).resolves.toBe(false);
   });
 
-  it("clears the stored vault", async () => {
+  it("clears the stored vault, metadata, and biometric record for one wallet", async () => {
     const localStorage = createLocalStorageMock();
     vi.stubGlobal("window", { localStorage });
 
-    await storageService.saveVault(testVault);
-    await storageService.saveAccountMetadata(testAccountMetadata);
-    await storageService.clearVault();
+    await storageService.saveVault(WALLET_ID, testVault);
+    await storageService.saveAccountMetadata(WALLET_ID, testAccountMetadata);
+    await storageService.saveBiometricVault(WALLET_ID, testBiometricVault);
+    await storageService.clearVault(WALLET_ID);
 
-    expect(localStorage.removeItem).toHaveBeenCalledWith(VAULT_STORAGE_KEY);
     expect(localStorage.removeItem).toHaveBeenCalledWith(
-      ACCOUNT_METADATA_STORAGE_KEY,
+      walletVaultKey(WALLET_ID),
     );
-    await expect(storageService.loadVault()).resolves.toBeNull();
-    await expect(storageService.loadAccountMetadata()).resolves.toBeNull();
+    expect(localStorage.removeItem).toHaveBeenCalledWith(
+      walletAccountMetadataKey(WALLET_ID),
+    );
+    expect(localStorage.removeItem).toHaveBeenCalledWith(
+      walletBiometricVaultKey(WALLET_ID),
+    );
+    await expect(storageService.loadVault(WALLET_ID)).resolves.toBeNull();
+    await expect(
+      storageService.loadAccountMetadata(WALLET_ID),
+    ).resolves.toBeNull();
+    await expect(
+      storageService.loadBiometricVault(WALLET_ID),
+    ).resolves.toBeNull();
   });
 
   it("saves and loads validated public account metadata", async () => {
     const localStorage = createLocalStorageMock();
     vi.stubGlobal("window", { localStorage });
 
-    await storageService.saveAccountMetadata(testAccountMetadata);
+    await storageService.saveAccountMetadata(WALLET_ID, testAccountMetadata);
 
     expect(localStorage.setItem).toHaveBeenCalledWith(
-      ACCOUNT_METADATA_STORAGE_KEY,
+      walletAccountMetadataKey(WALLET_ID),
       JSON.stringify(testAccountMetadata),
     );
-    await expect(storageService.loadAccountMetadata()).resolves.toEqual(
-      testAccountMetadata,
-    );
+    await expect(
+      storageService.loadAccountMetadata(WALLET_ID),
+    ).resolves.toEqual(testAccountMetadata);
   });
 
   it("returns null when account metadata has not been created yet", async () => {
     vi.stubGlobal("window", { localStorage: createLocalStorageMock() });
 
-    await expect(storageService.loadAccountMetadata()).resolves.toBeNull();
+    await expect(
+      storageService.loadAccountMetadata(WALLET_ID),
+    ).resolves.toBeNull();
   });
 
   it("rejects malformed or unsafe account metadata", async () => {
     const localStorage = createLocalStorageMock();
     vi.stubGlobal("window", { localStorage });
 
-    localStorage.setItem(ACCOUNT_METADATA_STORAGE_KEY, "{");
-    await expect(storageService.loadAccountMetadata()).rejects.toThrow(
-      "not valid JSON",
-    );
+    localStorage.setItem(walletAccountMetadataKey(WALLET_ID), "{");
+    await expect(
+      storageService.loadAccountMetadata(WALLET_ID),
+    ).rejects.toThrow("not valid JSON");
 
     localStorage.setItem(
-      ACCOUNT_METADATA_STORAGE_KEY,
+      walletAccountMetadataKey(WALLET_ID),
       JSON.stringify({
         ...testAccountMetadata,
         accounts: [
@@ -154,12 +192,12 @@ describe("vault storage", () => {
         ],
       }),
     );
-    await expect(storageService.loadAccountMetadata()).rejects.toThrow(
-      "invalid or duplicate accounts",
-    );
+    await expect(
+      storageService.loadAccountMetadata(WALLET_ID),
+    ).rejects.toThrow("invalid or duplicate accounts");
 
     localStorage.setItem(
-      ACCOUNT_METADATA_STORAGE_KEY,
+      walletAccountMetadataKey(WALLET_ID),
       JSON.stringify({
         ...testAccountMetadata,
         accounts: testAccountMetadata.accounts.map((account) => ({
@@ -168,9 +206,9 @@ describe("vault storage", () => {
         })),
       }),
     );
-    await expect(storageService.loadAccountMetadata()).rejects.toThrow(
-      "invalid or duplicate accounts",
-    );
+    await expect(
+      storageService.loadAccountMetadata(WALLET_ID),
+    ).rejects.toThrow("invalid or duplicate accounts");
   });
 
   it("rejects duplicate or invalid token metadata", async () => {
@@ -180,7 +218,7 @@ describe("vault storage", () => {
     const token = first.tokens![0]!;
 
     await expect(
-      storageService.saveAccountMetadata({
+      storageService.saveAccountMetadata(WALLET_ID, {
         ...testAccountMetadata,
         accounts: [
           testAccountMetadata.accounts[0]!,
@@ -190,7 +228,7 @@ describe("vault storage", () => {
     ).rejects.toThrow("duplicate tokens");
 
     await expect(
-      storageService.saveAccountMetadata({
+      storageService.saveAccountMetadata(WALLET_ID, {
         ...testAccountMetadata,
         accounts: [
           testAccountMetadata.accounts[0]!,
@@ -208,7 +246,7 @@ describe("vault storage", () => {
     const first = testAccountMetadata.accounts[1]!;
     const nft = first.nfts![0]!;
     await expect(
-      storageService.saveAccountMetadata({
+      storageService.saveAccountMetadata(WALLET_ID, {
         ...testAccountMetadata,
         accounts: [
           testAccountMetadata.accounts[0]!,
@@ -218,7 +256,7 @@ describe("vault storage", () => {
     ).rejects.toThrow("duplicate NFTs");
 
     await expect(
-      storageService.saveAccountMetadata({
+      storageService.saveAccountMetadata(WALLET_ID, {
         ...testAccountMetadata,
         accounts: [
           testAccountMetadata.accounts[0]!,
@@ -228,7 +266,7 @@ describe("vault storage", () => {
     ).rejects.toThrow("invalid NFT");
 
     await expect(
-      storageService.saveAccountMetadata({
+      storageService.saveAccountMetadata(WALLET_ID, {
         ...testAccountMetadata,
         accounts: [
           testAccountMetadata.accounts[0]!,
@@ -247,7 +285,7 @@ describe("vault storage", () => {
       "<svg></svg>",
     ).toString("base64")}`;
 
-    await storageService.saveAccountMetadata({
+    await storageService.saveAccountMetadata(WALLET_ID, {
       ...testAccountMetadata,
       accounts: [
         testAccountMetadata.accounts[0]!,
@@ -255,7 +293,9 @@ describe("vault storage", () => {
       ],
     });
 
-    await expect(storageService.loadAccountMetadata()).resolves.toMatchObject({
+    await expect(
+      storageService.loadAccountMetadata(WALLET_ID),
+    ).resolves.toMatchObject({
       accounts: [{ nfts: [] }, { nfts: [{ imageUrl }] }],
     });
   });
@@ -264,7 +304,7 @@ describe("vault storage", () => {
     const localStorage = createLocalStorageMock();
     vi.stubGlobal("window", { localStorage });
     localStorage.setItem(
-      ACCOUNT_METADATA_STORAGE_KEY,
+      walletAccountMetadataKey(WALLET_ID),
       JSON.stringify({
         version: 1,
         accounts: [
@@ -274,7 +314,9 @@ describe("vault storage", () => {
       }),
     );
 
-    await expect(storageService.loadAccountMetadata()).resolves.toMatchObject({
+    await expect(
+      storageService.loadAccountMetadata(WALLET_ID),
+    ).resolves.toMatchObject({
       accounts: [{ tokens: [], nfts: [] }],
     });
   });
@@ -286,7 +328,7 @@ describe("vault storage", () => {
     const token = first.tokens![0]!;
     const nft = first.nfts![0]!;
 
-    await storageService.saveAccountMetadata({
+    await storageService.saveAccountMetadata(WALLET_ID, {
       ...testAccountMetadata,
       accounts: [
         testAccountMetadata.accounts[0]!,
@@ -298,7 +340,9 @@ describe("vault storage", () => {
       ],
     });
 
-    await expect(storageService.loadAccountMetadata()).resolves.toMatchObject({
+    await expect(
+      storageService.loadAccountMetadata(WALLET_ID),
+    ).resolves.toMatchObject({
       accounts: [
         { tokens: [], nfts: [] },
         {
@@ -313,7 +357,7 @@ describe("vault storage", () => {
     const localStorage = createLocalStorageMock();
     vi.stubGlobal("window", { localStorage });
     localStorage.setItem(
-      ACCOUNT_METADATA_STORAGE_KEY,
+      walletAccountMetadataKey(WALLET_ID),
       JSON.stringify({
         version: 1,
         accounts: [
@@ -337,7 +381,9 @@ describe("vault storage", () => {
       }),
     );
 
-    await expect(storageService.loadAccountMetadata()).resolves.toMatchObject({
+    await expect(
+      storageService.loadAccountMetadata(WALLET_ID),
+    ).resolves.toMatchObject({
       accounts: [{ tokens: [{ chainId: 11155111 }] }],
     });
   });
@@ -348,7 +394,7 @@ describe("vault storage", () => {
     const token = first.tokens![0]!;
 
     await expect(
-      storageService.saveAccountMetadata({
+      storageService.saveAccountMetadata(WALLET_ID, {
         ...testAccountMetadata,
         accounts: [
           testAccountMetadata.accounts[0]!,
@@ -362,13 +408,16 @@ describe("vault storage", () => {
     const localStorage = createLocalStorageMock();
     vi.stubGlobal("window", { localStorage });
 
-    localStorage.setItem(VAULT_STORAGE_KEY, "{");
-    await expect(storageService.loadVault()).rejects.toThrow(
+    localStorage.setItem(walletVaultKey(WALLET_ID), "{");
+    await expect(storageService.loadVault(WALLET_ID)).rejects.toThrow(
       "Stored vault is not valid JSON",
     );
 
-    localStorage.setItem(VAULT_STORAGE_KEY, JSON.stringify({ version: 1 }));
-    await expect(storageService.loadVault()).rejects.toThrow(
+    localStorage.setItem(
+      walletVaultKey(WALLET_ID),
+      JSON.stringify({ version: 1 }),
+    );
+    await expect(storageService.loadVault(WALLET_ID)).rejects.toThrow(
       "invalid structure",
     );
   });
@@ -376,77 +425,159 @@ describe("vault storage", () => {
   it("fails explicitly outside a browser", async () => {
     vi.stubGlobal("window", undefined);
 
-    await expect(storageService.loadVault()).rejects.toThrow(
+    await expect(storageService.loadVault(WALLET_ID)).rejects.toThrow(
       "only available in a browser",
     );
+    await expect(storageService.loadRegistry()).rejects.toThrow(
+      "only available in a browser",
+    );
+  });
+});
+
+describe("wallet registry storage", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("saves and loads the registry under a single key", async () => {
+    const localStorage = createLocalStorageMock();
+    vi.stubGlobal("window", { localStorage });
+
+    await storageService.saveRegistry(testRegistry);
+
+    expect(localStorage.setItem).toHaveBeenCalledWith(
+      WALLET_REGISTRY_STORAGE_KEY,
+      JSON.stringify(testRegistry),
+    );
+    await expect(storageService.loadRegistry()).resolves.toEqual(testRegistry);
+  });
+
+  it("returns null when there is no registry and no legacy wallet", async () => {
+    vi.stubGlobal("window", { localStorage: createLocalStorageMock() });
+
+    await expect(storageService.loadRegistry()).resolves.toBeNull();
+  });
+
+  it("rejects a malformed or duplicate registry", async () => {
+    const localStorage = createLocalStorageMock();
+    vi.stubGlobal("window", { localStorage });
+
+    localStorage.setItem(WALLET_REGISTRY_STORAGE_KEY, "{");
+    await expect(storageService.loadRegistry()).rejects.toThrow(
+      "not valid JSON",
+    );
+
+    localStorage.setItem(
+      WALLET_REGISTRY_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        wallets: [
+          { id: WALLET_ID, name: "A", createdAt: 1 },
+          { id: WALLET_ID, name: "B", createdAt: 2 },
+        ],
+        selectedId: WALLET_ID,
+      }),
+    );
+    await expect(storageService.loadRegistry()).rejects.toThrow(
+      "duplicate wallets",
+    );
+  });
+
+  it("migrates a legacy single-wallet install into the registry", async () => {
+    const localStorage = createLocalStorageMock();
+    vi.stubGlobal("window", { localStorage });
+    localStorage.setItem(VAULT_STORAGE_KEY, JSON.stringify(testVault));
+    localStorage.setItem(
+      ACCOUNT_METADATA_STORAGE_KEY,
+      JSON.stringify(testAccountMetadata),
+    );
+    localStorage.setItem(
+      BIOMETRIC_VAULT_STORAGE_KEY,
+      JSON.stringify(testBiometricVault),
+    );
+
+    const registry = await storageService.loadRegistry();
+
+    expect(registry?.wallets).toHaveLength(1);
+    expect(registry?.wallets[0]?.name).toBe("Wallet 1");
+    const migratedId = registry?.wallets[0]?.id;
+    expect(registry?.selectedId).toBe(migratedId);
+    if (!migratedId) throw new Error("expected a migrated wallet id");
+
+    // The records now live under wallet-scoped keys...
+    await expect(storageService.loadVault(migratedId)).resolves.toEqual(
+      testVault,
+    );
+    await expect(
+      storageService.loadAccountMetadata(migratedId),
+    ).resolves.toEqual(testAccountMetadata);
+    await expect(
+      storageService.loadBiometricVault(migratedId),
+    ).resolves.toEqual(testBiometricVault);
+    // ...and the legacy keys are gone.
+    expect(localStorage.getItem(VAULT_STORAGE_KEY)).toBeNull();
+    expect(localStorage.getItem(ACCOUNT_METADATA_STORAGE_KEY)).toBeNull();
+    expect(localStorage.getItem(BIOMETRIC_VAULT_STORAGE_KEY)).toBeNull();
+
+    // Migration is idempotent: the persisted registry is returned on reload.
+    await expect(storageService.loadRegistry()).resolves.toEqual(registry);
   });
 });
 
 describe("biometric vault storage", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("saves and loads the biometric vault under the fixed key", async () => {
+  it("saves and loads the biometric vault under the wallet-scoped key", async () => {
     const localStorage = createLocalStorageMock();
     vi.stubGlobal("window", { localStorage });
 
-    await storageService.saveBiometricVault(testBiometricVault);
+    await storageService.saveBiometricVault(WALLET_ID, testBiometricVault);
 
     expect(localStorage.setItem).toHaveBeenCalledWith(
-      BIOMETRIC_VAULT_STORAGE_KEY,
+      walletBiometricVaultKey(WALLET_ID),
       JSON.stringify(testBiometricVault),
     );
-    await expect(storageService.loadBiometricVault()).resolves.toEqual(
-      testBiometricVault,
-    );
+    await expect(
+      storageService.loadBiometricVault(WALLET_ID),
+    ).resolves.toEqual(testBiometricVault);
   });
 
   it("returns null when no biometric vault has been saved", async () => {
     vi.stubGlobal("window", { localStorage: createLocalStorageMock() });
 
-    await expect(storageService.loadBiometricVault()).resolves.toBeNull();
+    await expect(
+      storageService.loadBiometricVault(WALLET_ID),
+    ).resolves.toBeNull();
   });
 
   it("rejects malformed biometric vault records", async () => {
     const localStorage = createLocalStorageMock();
     vi.stubGlobal("window", { localStorage });
 
-    localStorage.setItem(BIOMETRIC_VAULT_STORAGE_KEY, "{");
-    await expect(storageService.loadBiometricVault()).rejects.toThrow(
-      "not valid JSON",
-    );
+    localStorage.setItem(walletBiometricVaultKey(WALLET_ID), "{");
+    await expect(
+      storageService.loadBiometricVault(WALLET_ID),
+    ).rejects.toThrow("not valid JSON");
 
     localStorage.setItem(
-      BIOMETRIC_VAULT_STORAGE_KEY,
+      walletBiometricVaultKey(WALLET_ID),
       JSON.stringify({ version: 1 }),
     );
-    await expect(storageService.loadBiometricVault()).rejects.toThrow(
-      "invalid structure",
-    );
+    await expect(
+      storageService.loadBiometricVault(WALLET_ID),
+    ).rejects.toThrow("invalid structure");
   });
 
-  it("removes the biometric vault together with the wallet", async () => {
+  it("clears only the biometric vault for one wallet", async () => {
     const localStorage = createLocalStorageMock();
     vi.stubGlobal("window", { localStorage });
 
-    await storageService.saveBiometricVault(testBiometricVault);
-    await storageService.clearVault();
+    await storageService.saveBiometricVault(WALLET_ID, testBiometricVault);
+    await storageService.clearBiometricVault(WALLET_ID);
 
     expect(localStorage.removeItem).toHaveBeenCalledWith(
-      BIOMETRIC_VAULT_STORAGE_KEY,
+      walletBiometricVaultKey(WALLET_ID),
     );
-    await expect(storageService.loadBiometricVault()).resolves.toBeNull();
-  });
-
-  it("clears only the biometric vault", async () => {
-    const localStorage = createLocalStorageMock();
-    vi.stubGlobal("window", { localStorage });
-
-    await storageService.saveBiometricVault(testBiometricVault);
-    await storageService.clearBiometricVault();
-
-    expect(localStorage.removeItem).toHaveBeenCalledWith(
-      BIOMETRIC_VAULT_STORAGE_KEY,
-    );
-    await expect(storageService.loadBiometricVault()).resolves.toBeNull();
+    await expect(
+      storageService.loadBiometricVault(WALLET_ID),
+    ).resolves.toBeNull();
   });
 });
