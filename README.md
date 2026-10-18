@@ -35,9 +35,14 @@ Open [http://localhost:3000](http://localhost:3000) to view the app.
 - `src/services/token-service.ts` — ERC-20 metadata and balance reads from the active chain's RPC
 - `src/services/nft-service.ts` — ERC-721/ERC-1155 metadata URI and public metadata reads
 - `src/services/etherscan-history.ts` — server-only Etherscan V2 activity adapter
+- `src/services/transaction-history.ts` — history item and pagination-cursor validation shared by the route and the UI
+- `src/services/account-abstraction-service.ts` — EIP-7702 delegation reads and revocation
 - `src/app/api/transactions/route.ts` — validated same-origin history endpoint
+- `src/lib/address.ts` — address truncation for display
 - `src/lib/base64.ts` — shared base64 and base64url helpers for vaults and credentials
-- `src/store/`, `src/types/` — reserved for follow-up state
+- `src/lib/clipboard.ts` — clipboard writes with an `execCommand` fallback
+- `src/lib/use-active-chain.ts` — React hook that subscribes to the persisted active-chain store
+- `src/types/transaction-history.ts` — shared transaction-history types
 
 Wallet creation displays a recovery phrase before asking the user to confirm
 its backup and set a password. The vault is not persisted before confirmation.
