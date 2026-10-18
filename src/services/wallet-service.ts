@@ -23,6 +23,18 @@ import {
   type StorageService,
   type WalletAccountMetadata,
 } from "@/core/storage";
+import {
+  createPrfSalt,
+  unwrapMnemonic,
+  wrapMnemonic,
+  type BiometricVault,
+} from "@/core/biometric-vault";
+import {
+  evaluatePrf,
+  isBiometricUnlockSupported,
+  registerBiometricCredential,
+} from "@/core/webauthn";
+import { decodeBase64 } from "@/lib/base64";
 import { sendErc20Transfer, sendNativeTransfer } from "./transaction-service";
 import { chainService } from "./chain-service";
 import {
@@ -58,8 +70,36 @@ export interface PreparedWallet {
   address: Address;
 }
 
+/**
+ * Wraps the passkey ceremony so the service stays testable and the browser
+ * APIs are only touched in one place (`core/webauthn.ts`).
+ */
+export interface BiometricUnlockProvider {
+  isSupported(): Promise<boolean>;
+  register(options: {
+    rpId: string;
+    userName: string;
+    prfSalt: Uint8Array;
+  }): Promise<{ credentialId: string; prfOutput: Uint8Array }>;
+  evaluate(options: {
+    credentialId: string;
+    prfSalt: Uint8Array;
+    rpId: string;
+  }): Promise<Uint8Array>;
+  getRpId(): string | null;
+}
+
+const defaultBiometricProvider: BiometricUnlockProvider = {
+  isSupported: isBiometricUnlockSupported,
+  register: registerBiometricCredential,
+  evaluate: evaluatePrf,
+  getRpId: () =>
+    typeof window === "undefined" ? null : window.location.hostname,
+};
+
 export interface WalletServiceDependencies {
   storage?: StorageService;
+  biometric?: BiometricUnlockProvider;
   readTokenMetadata?: (
     address: Address,
     chainId: number,
@@ -139,6 +179,7 @@ export class WalletService {
   private readonly getActiveChainId: NonNullable<
     WalletServiceDependencies["getActiveChainId"]
   >;
+  private readonly biometric: BiometricUnlockProvider;
 
   constructor(dependencies: WalletServiceDependencies = {}) {
     this.storage = dependencies.storage ?? storageService;
@@ -150,6 +191,7 @@ export class WalletService {
     this.readNftOwnership = dependencies.readNftOwnership ?? readNftOwnership;
     this.getActiveChainId =
       dependencies.getActiveChainId ?? (() => chainService.activeChainId);
+    this.biometric = dependencies.biometric ?? defaultBiometricProvider;
   }
 
   get isUnlocked(): boolean {
@@ -310,6 +352,18 @@ export class WalletService {
 
     const mnemonic = await decryptVault(vault, password);
     this.assertOperationCurrent(operationVersion);
+    await this.activateFromMnemonic(mnemonic, operationVersion);
+  }
+
+  /**
+   * Starts a wallet session from a decrypted recovery phrase. Shared by the
+   * password and biometric unlock paths so both restore exactly the same
+   * accounts and selected account.
+   */
+  private async activateFromMnemonic(
+    mnemonic: string,
+    operationVersion: number,
+  ): Promise<void> {
     if (!validateMnemonic(mnemonic)) {
       throw new Error("Stored vault does not contain a valid BIP-39 mnemonic");
     }
@@ -370,6 +424,116 @@ export class WalletService {
     this.updateState(false, [], null);
     this.pendingWallet?.seed.fill(0);
     this.pendingWallet = null;
+  }
+
+  /** Whether a wrapped biometric vault exists on this device. */
+  async hasBiometricUnlock(): Promise<boolean> {
+    return (await this.storage.loadBiometricVault()) !== null;
+  }
+
+  /** Whether this browser can run a platform-authenticator ceremony. */
+  async isBiometricUnlockAvailable(): Promise<boolean> {
+    return this.biometric.isSupported();
+  }
+
+  /**
+   * Enables Touch ID / Face ID unlock by re-confirming the password, creating a
+   * PRF-capable passkey, and wrapping the recovery phrase under the passkey's
+   * derived key. Nothing is stored unless the passkey yields a usable PRF.
+   */
+  async enableBiometricUnlock(password: string): Promise<void> {
+    if (!this.state.isUnlocked) {
+      throw new Error("Wallet is locked");
+    }
+    this.assertNoWalletCreationInProgress();
+    const operationVersion = this.operationVersion;
+    const rpId = this.biometric.getRpId();
+    if (!rpId) {
+      throw new Error("Biometric unlock is not available in this browser");
+    }
+    if (!(await this.biometric.isSupported())) {
+      throw new Error("Biometric unlock is not available on this device");
+    }
+
+    const vault = await this.storage.loadVault();
+    if (!vault) {
+      throw new Error("No wallet is stored on this device");
+    }
+    // Re-verify the password so the recovery phrase can be wrapped and the
+    // enrollment cannot be triggered from a stale session.
+    const mnemonic = await decryptVault(vault, password);
+    this.assertOperationCurrent(operationVersion);
+
+    const prfSalt = createPrfSalt();
+    const { credentialId, prfOutput } = await this.biometric.register({
+      rpId,
+      userName: this.state.address ?? "my-wallet",
+      prfSalt,
+    });
+    this.assertOperationCurrent(operationVersion);
+
+    let biometricVault: BiometricVault;
+    try {
+      biometricVault = await wrapMnemonic({
+        mnemonic,
+        prfOutput,
+        credentialId,
+        rpId,
+        // The same salt used for the passkey ceremony, so unlock can
+        // re-evaluate the identical PRF output.
+        prfSalt,
+      });
+    } finally {
+      prfOutput.fill(0);
+    }
+    this.assertOperationCurrent(operationVersion);
+    await this.storage.saveBiometricVault(biometricVault);
+  }
+
+  /**
+   * Removes the locally wrapped vault. The passkey itself stays in the OS
+   * keychain; the user removes it there if they want it gone entirely.
+   */
+  async disableBiometricUnlock(): Promise<void> {
+    await this.storage.clearBiometricVault();
+  }
+
+  /**
+   * Unlocks with Touch ID / Face ID. The passkey's PRF output decrypts the
+   * wrapped recovery phrase, so no password is needed. The password path is
+   * untouched and remains the fallback.
+   */
+  async unlockWithBiometric(): Promise<void> {
+    this.assertNoWalletCreationInProgress();
+    this.lock();
+    const operationVersion = this.operationVersion;
+    const vault = await this.storage.loadBiometricVault();
+    this.assertOperationCurrent(operationVersion);
+    if (!vault) {
+      throw new Error("Biometric unlock is not set up on this device");
+    }
+    const rpId = this.biometric.getRpId();
+    if (!rpId || rpId !== vault.rpId) {
+      throw new Error("Biometric unlock must be set up again on this device");
+    }
+
+    const prfOutput = await this.biometric.evaluate({
+      credentialId: vault.credentialId,
+      prfSalt: decodeBase64(vault.prfSalt, "Biometric vault PRF salt"),
+      rpId,
+    });
+    this.assertOperationCurrent(operationVersion);
+
+    let mnemonic: string;
+    try {
+      mnemonic = await unwrapMnemonic(vault, prfOutput);
+    } catch {
+      throw new Error("Unable to decrypt the biometric vault");
+    } finally {
+      prfOutput.fill(0);
+    }
+    this.assertOperationCurrent(operationVersion);
+    await this.activateFromMnemonic(mnemonic, operationVersion);
   }
 
   getAddress(): Address | null {

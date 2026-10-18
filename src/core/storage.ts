@@ -1,4 +1,8 @@
 import type { EncryptedVault } from "./crypto";
+import {
+  validateBiometricVault,
+  type BiometricVault,
+} from "./biometric-vault";
 import { accountDerivationPath } from "./hd-wallet";
 import { isSafeImageUri, MAX_IMAGE_URL_LENGTH } from "./url-safety";
 import { DEFAULT_CHAIN_ID, isSupportedChainId } from "./chain";
@@ -6,6 +10,7 @@ import { getAddress } from "viem";
 
 export const VAULT_STORAGE_KEY = "wallet_vault_v1";
 export const ACCOUNT_METADATA_STORAGE_KEY = "wallet_accounts_v1";
+export const BIOMETRIC_VAULT_STORAGE_KEY = "wallet_biometric_v1";
 
 export interface StoredWalletAccount {
   readonly path: string;
@@ -47,6 +52,9 @@ export interface StorageService {
   loadVault(): Promise<EncryptedVault | null>;
   clearVault(): Promise<void>;
   hasVault(): Promise<boolean>;
+  saveBiometricVault(vault: BiometricVault): Promise<void>;
+  loadBiometricVault(): Promise<BiometricVault | null>;
+  clearBiometricVault(): Promise<void>;
   saveAccountMetadata(metadata: WalletAccountMetadata): Promise<void>;
   loadAccountMetadata(): Promise<WalletAccountMetadata | null>;
   clearAccountMetadata(): Promise<void>;
@@ -77,10 +85,36 @@ export const storageService: StorageService = {
     const storage = getLocalStorage();
     storage.removeItem(VAULT_STORAGE_KEY);
     storage.removeItem(ACCOUNT_METADATA_STORAGE_KEY);
+    storage.removeItem(BIOMETRIC_VAULT_STORAGE_KEY);
   },
 
   async hasVault() {
     return (await storageService.loadVault()) !== null;
+  },
+
+  async saveBiometricVault(vault) {
+    const storage = getLocalStorage();
+    const validatedVault = validateBiometricVault(vault);
+    storage.setItem(BIOMETRIC_VAULT_STORAGE_KEY, JSON.stringify(validatedVault));
+  },
+
+  async loadBiometricVault() {
+    const storage = getLocalStorage();
+    const serializedVault = storage.getItem(BIOMETRIC_VAULT_STORAGE_KEY);
+    if (serializedVault === null) return null;
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(serializedVault);
+    } catch {
+      throw new Error("Stored biometric vault is not valid JSON");
+    }
+    return validateBiometricVault(parsed);
+  },
+
+  async clearBiometricVault() {
+    const storage = getLocalStorage();
+    storage.removeItem(BIOMETRIC_VAULT_STORAGE_KEY);
   },
 
   async saveAccountMetadata(metadata) {

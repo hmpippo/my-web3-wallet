@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { walletService } from "@/services/wallet-service";
 
 export function UnlockWalletForm() {
@@ -11,6 +11,44 @@ export function UnlockWalletForm() {
   const [showPassword, setShowPassword] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [biometricLabel, setBiometricLabel] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [enrolled, supported] = await Promise.all([
+          walletService.hasBiometricUnlock(),
+          walletService.isBiometricUnlockAvailable(),
+        ]);
+        if (!cancelled && enrolled && supported) {
+          setBiometricLabel(getBiometricLabel());
+        }
+      } catch {
+        // The biometric probe is best-effort; password unlock always works.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function unlockWithBiometric() {
+    setError(null);
+    setIsBusy(true);
+    try {
+      await walletService.unlockWithBiometric();
+      router.replace("/wallet");
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? `${caught.message} Use your password instead.`
+          : "Biometric unlock failed. Use your password instead.",
+      );
+    } finally {
+      setIsBusy(false);
+    }
+  }
 
   async function unlock(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -39,6 +77,26 @@ export function UnlockWalletForm() {
       <p className="muted-copy">
         Enter the password you chose for this device.
       </p>
+
+      {biometricLabel ? (
+        <div className="biometric-unlock">
+          <button
+            className="button button-primary"
+            disabled={isBusy}
+            onClick={() => void unlockWithBiometric()}
+            type="button"
+          >
+            {isBusy ? "Unlocking..." : `Unlock with ${biometricLabel}`}
+          </button>
+          <p className="field-help">
+            Your password always keeps working as a backup.
+          </p>
+          <p className="form-divider" aria-hidden="true">
+            or use your password
+          </p>
+        </div>
+      ) : null}
+
       <form className="wallet-form" onSubmit={unlock}>
         <label className="form-field">
           Password
@@ -110,4 +168,13 @@ export function UnlockWalletForm() {
       )}
     </section>
   );
+}
+
+/** Best-effort label for the platform authenticator; falls back to a generic one. */
+function getBiometricLabel(): string {
+  if (typeof navigator === "undefined") return "biometric unlock";
+  const userAgent = navigator.userAgent ?? "";
+  if (/iPhone|iPad|iPod/.test(userAgent)) return "Face ID";
+  if (/Macintosh|Mac OS X/.test(userAgent)) return "Touch ID";
+  return "biometric unlock";
 }

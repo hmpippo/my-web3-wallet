@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { encryptVault, type EncryptedVault } from "@/core/crypto";
 import { deriveAccountAtIndex, mnemonicToSeed } from "@/core/hd-wallet";
+import type { BiometricVault } from "@/core/biometric-vault";
+import { decodeBase64 } from "@/lib/base64";
 import type {
   StorageService,
   WalletAccountMetadata,
 } from "@/core/storage";
-import { WalletService } from "./wallet-service";
+import { WalletService, type BiometricUnlockProvider } from "./wallet-service";
 
 const TEST_MNEMONIC =
   "test test test test test test test test test test test junk";
@@ -22,9 +24,11 @@ const SEPOLIA = 11155111;
 function createStorage(
   initialVault: EncryptedVault | null = null,
   initialMetadata: WalletAccountMetadata | null = null,
+  initialBiometricVault: BiometricVault | null = null,
 ) {
   let vault = initialVault;
   let accountMetadata = initialMetadata;
+  let biometricVault = initialBiometricVault;
   const storage: StorageService = {
     saveVault: vi.fn(async (value) => {
       vault = value;
@@ -41,11 +45,19 @@ function createStorage(
     clearAccountMetadata: vi.fn(async () => {
       accountMetadata = null;
     }),
+    saveBiometricVault: vi.fn(async (value) => {
+      biometricVault = value;
+    }),
+    loadBiometricVault: vi.fn(async () => biometricVault),
+    clearBiometricVault: vi.fn(async () => {
+      biometricVault = null;
+    }),
   };
   return {
     storage,
     getVault: () => vault,
     getAccountMetadata: () => accountMetadata,
+    getBiometricVault: () => biometricVault,
   };
 }
 
@@ -283,6 +295,9 @@ describe("WalletService", () => {
       saveAccountMetadata: vi.fn(async () => undefined),
       loadAccountMetadata: vi.fn(async () => null),
       clearAccountMetadata: vi.fn(async () => undefined),
+      saveBiometricVault: vi.fn(async () => undefined),
+      loadBiometricVault: vi.fn(async () => null),
+      clearBiometricVault: vi.fn(async () => undefined),
     };
     const service = new WalletService({ storage });
     const unlockPromise = service.unlock("correct horse");
@@ -1050,6 +1065,9 @@ describe("WalletService", () => {
       saveAccountMetadata: vi.fn(async () => undefined),
       loadAccountMetadata: vi.fn(async () => null),
       clearAccountMetadata: vi.fn(async () => undefined),
+      saveBiometricVault: vi.fn(async () => undefined),
+      loadBiometricVault: vi.fn(async () => null),
+      clearBiometricVault: vi.fn(async () => undefined),
     };
     const service = new WalletService({ storage });
     const preparation = service.prepareWallet();
@@ -1075,6 +1093,9 @@ describe("WalletService", () => {
       saveAccountMetadata: vi.fn(async () => undefined),
       loadAccountMetadata: vi.fn(async () => null),
       clearAccountMetadata: vi.fn(async () => undefined),
+      saveBiometricVault: vi.fn(async () => undefined),
+      loadBiometricVault: vi.fn(async () => null),
+      clearBiometricVault: vi.fn(async () => undefined),
     };
     const service = new WalletService({ storage });
     const importing = service.importWallet(TEST_MNEMONIC, "correct horse");
@@ -1111,5 +1132,172 @@ describe("WalletService", () => {
       service.createWallet("correct horse", true),
     ).rejects.toThrow("Storage unavailable");
     expect(service.getState()).toEqual(LOCKED_STATE);
+  });
+});
+
+/**
+ * A deterministic, salt-dependent stand-in for the WebAuthn PRF extension. The
+ * real extension derives its output from the credential and the salt, so a
+ * mismatched salt yields a different output — the failure mode this guards
+ * against. A constant mock would hide that bug.
+ */
+function derivePrf(prfSalt: Uint8Array): Uint8Array {
+  const output = new Uint8Array(32);
+  for (let index = 0; index < output.length; index += 1) {
+    output[index] = (prfSalt[index % prfSalt.length] ?? 0) ^ (index + 1);
+  }
+  return output;
+}
+
+function createBiometricProvider(
+  overrides: Partial<BiometricUnlockProvider> = {},
+): BiometricUnlockProvider {
+  return {
+    isSupported: vi.fn(async () => true),
+    register: vi.fn(async ({ prfSalt }) => ({
+      credentialId: "credential-1",
+      prfOutput: derivePrf(prfSalt),
+    })),
+    evaluate: vi.fn(async ({ prfSalt }) => derivePrf(prfSalt)),
+    getRpId: vi.fn(() => "localhost"),
+    ...overrides,
+  };
+}
+
+describe("WalletService biometric unlock", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("requires an unlocked wallet to enable biometric unlock", async () => {
+    const { storage, getBiometricVault } = createStorage();
+    const service = new WalletService({
+      storage,
+      biometric: createBiometricProvider(),
+    });
+
+    await expect(
+      service.enableBiometricUnlock("correct horse"),
+    ).rejects.toThrow("Wallet is locked");
+    expect(getBiometricVault()).toBeNull();
+  });
+
+  it("wraps the recovery phrase and unlocks with the passkey PRF", async () => {
+    const { storage, getBiometricVault } = createStorage();
+    const biometric = createBiometricProvider();
+    const service = new WalletService({ storage, biometric });
+    await service.importWallet(TEST_MNEMONIC, "correct horse");
+
+    await service.enableBiometricUnlock("correct horse");
+
+    expect(getBiometricVault()).not.toBeNull();
+    expect(JSON.stringify(getBiometricVault())).not.toContain(TEST_MNEMONIC);
+    expect(biometric.register).toHaveBeenCalledWith({
+      rpId: "localhost",
+      userName: EXPECTED_ADDRESS,
+      prfSalt: expect.any(Uint8Array),
+    });
+
+    service.lock();
+    expect(service.getState()).toEqual(LOCKED_STATE);
+    await service.unlockWithBiometric();
+    expect(service.getAddress()).toBe(EXPECTED_ADDRESS);
+  });
+
+  it("stores the same PRF salt it registered with the passkey", async () => {
+    const { storage, getBiometricVault } = createStorage();
+    const biometric = createBiometricProvider();
+    const service = new WalletService({ storage, biometric });
+    await service.importWallet(TEST_MNEMONIC, "correct horse");
+
+    await service.enableBiometricUnlock("correct horse");
+
+    const registeredSalt =
+      vi.mocked(biometric.register).mock.calls[0]?.[0].prfSalt;
+    const storedVault = getBiometricVault();
+    if (!storedVault) throw new Error("expected a stored biometric vault");
+
+    // Unlock re-evaluates the PRF with the stored salt, so it must match the
+    // salt the passkey was registered with.
+    expect(registeredSalt).toBeInstanceOf(Uint8Array);
+    expect(decodeBase64(storedVault.prfSalt, "prf salt")).toEqual(
+      registeredSalt,
+    );
+  });
+
+  it("refuses to enable with a wrong password and stores nothing", async () => {
+    const { storage, getBiometricVault } = createStorage();
+    const biometric = createBiometricProvider();
+    const service = new WalletService({ storage, biometric });
+    await service.importWallet(TEST_MNEMONIC, "correct horse");
+
+    await expect(
+      service.enableBiometricUnlock("wrong password"),
+    ).rejects.toThrow("Unable to decrypt vault");
+    expect(getBiometricVault()).toBeNull();
+    expect(biometric.register).not.toHaveBeenCalled();
+  });
+
+  it("fails when biometric unlock is not set up", async () => {
+    const service = new WalletService({
+      storage: createStorage().storage,
+      biometric: createBiometricProvider(),
+    });
+
+    await expect(service.unlockWithBiometric()).rejects.toThrow("not set up");
+  });
+
+  it("rejects a wrapped vault from another origin", async () => {
+    const storedVault: BiometricVault = {
+      version: 1,
+      credentialId: "credential-1",
+      rpId: "example.com",
+      prfSalt: "c2FsdA==",
+      kdfSalt: "a2Rmc2FsdA==",
+      iv: "aXY=",
+      ciphertext: "Y2lwaGVydGV4dA==",
+      createdAt: 1,
+    };
+    const { storage } = createStorage(null, null, storedVault);
+    const biometric = createBiometricProvider();
+    const service = new WalletService({ storage, biometric });
+
+    await expect(service.unlockWithBiometric()).rejects.toThrow(
+      "must be set up again",
+    );
+    expect(biometric.evaluate).not.toHaveBeenCalled();
+  });
+
+  it("fails to decrypt when the passkey returns a different PRF output", async () => {
+    const { storage } = createStorage();
+    const biometric = createBiometricProvider();
+    const service = new WalletService({ storage, biometric });
+    await service.importWallet(TEST_MNEMONIC, "correct horse");
+    await service.enableBiometricUnlock("correct horse");
+
+    biometric.evaluate = vi.fn(async () => new Uint8Array(32).fill(200));
+    service.lock();
+
+    await expect(service.unlockWithBiometric()).rejects.toThrow(
+      "Unable to decrypt the biometric vault",
+    );
+    expect(service.getState()).toEqual(LOCKED_STATE);
+  });
+
+  it("reports and clears the local enrollment", async () => {
+    const { storage, getBiometricVault } = createStorage();
+    const service = new WalletService({
+      storage,
+      biometric: createBiometricProvider(),
+    });
+    await service.importWallet(TEST_MNEMONIC, "correct horse");
+
+    await expect(service.hasBiometricUnlock()).resolves.toBe(false);
+    await expect(service.isBiometricUnlockAvailable()).resolves.toBe(true);
+
+    await service.enableBiometricUnlock("correct horse");
+    await expect(service.hasBiometricUnlock()).resolves.toBe(true);
+
+    await service.disableBiometricUnlock();
+    await expect(service.hasBiometricUnlock()).resolves.toBe(false);
+    expect(getBiometricVault()).toBeNull();
   });
 });

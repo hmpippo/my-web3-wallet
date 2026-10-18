@@ -21,17 +21,20 @@ Open [http://localhost:3000](http://localhost:3000) to view the app.
 - `src/components/` — shared presentational UI
 - `src/core/hd-wallet.ts` — BIP-39 mnemonics and BIP-32 account derivation
 - `src/core/crypto.ts` — PBKDF2 (600,000 iterations) and AES-GCM vault encryption
-- `src/core/storage.ts` — encrypted vault and public account metadata storage
+- `src/core/webauthn.ts` — WebAuthn passkey creation and PRF evaluation for biometric unlock
+- `src/core/biometric-vault.ts` — HKDF and AES-GCM wrapping of the recovery phrase under a passkey
+- `src/core/storage.ts` — encrypted vault, biometric unlock vault, and public account metadata storage
 - `src/core/chain.ts` — supported-chain registry, per-chain RPC resolution, and cached viem public clients
 - `src/services/chain-service.ts` — persisted active-chain store for the network switcher
-- `src/services/wallet-service.ts` — create, import, unlock, lock, and send lifecycle
+- `src/services/wallet-service.ts` — create, import, unlock (password or biometric), lock, and send lifecycle
 - `src/services/transaction-service.ts` — estimated-gas native transfers with viem
 - `src/services/balance-service.ts` — native balance reads for the active chain
 - `src/services/token-service.ts` — ERC-20 metadata and balance reads from the active chain's RPC
 - `src/services/nft-service.ts` — ERC-721/ERC-1155 metadata URI and public metadata reads
 - `src/services/etherscan-history.ts` — server-only Etherscan V2 activity adapter
 - `src/app/api/transactions/route.ts` — validated same-origin history endpoint
-- `src/store/`, `src/types/`, `src/lib/` — reserved for follow-up state and shared utilities
+- `src/lib/base64.ts` — shared base64 and base64url helpers for vaults and credentials
+- `src/store/`, `src/types/` — reserved for follow-up state
 
 Wallet creation displays a recovery phrase before asking the user to confirm
 its backup and set a password. The vault is not persisted before confirmation.
@@ -82,6 +85,29 @@ entry, so a network hiccup can never silently wipe the list. The wallet still
 never discovers NFTs automatically. Removing an entry only removes it from the
 local list and has no on-chain effect. Metadata fetch, CORS, gateway, or
 ownership-read errors are surfaced so the user can retry.
+
+## Biometric unlock
+
+Unlock the wallet with Touch ID or Face ID instead of typing the password. The
+feature is opt-in per device: enable it from the wallet's Settings page by
+confirming the password, which creates a platform passkey and wraps a second
+copy of the recovery phrase under a key derived from the passkey's WebAuthn PRF
+extension (`HKDF-SHA256`, then `AES-GCM`). Touch ID / Face ID is therefore
+cryptographically required to decrypt that copy: the wrapped phrase stored in
+`wallet_biometric_v1` is useless without the passkey. The password vault is
+unchanged and always works as the fallback, and the same recovery phrase and
+accounts are restored either way.
+
+Enrollment is gated on a runtime capability check — the browser must be in a
+secure context, expose a user-verifying platform authenticator, and return a PRF
+result. If any of those fail, the option is hidden and nothing is stored.
+Biometric unlock is per device. The passkey itself may sync through the OS
+provider (iCloud Keychain on Apple devices, Google Password Manager elsewhere),
+but the encrypted vault stays in local storage, so a new device needs one
+password unlock before biometric unlock can be enabled there. Turning it off
+removes the local wrapped vault; the passkey is removed from the OS keychain by
+the user. The Touch ID / Face ID ceremony cannot be automated in tests and
+should be verified manually on a real device.
 
 ## Networks
 

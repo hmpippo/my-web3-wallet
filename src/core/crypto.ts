@@ -1,3 +1,5 @@
+import { decodeBase64, encodeBase64 } from "@/lib/base64";
+
 const VAULT_VERSION = 1 as const;
 const PBKDF2_ITERATIONS = 600_000;
 const SALT_LENGTH = 16;
@@ -52,9 +54,9 @@ export async function decryptVault(
 ): Promise<string> {
   validatePassword(password);
   const validatedVault = validateVault(vault);
-  const salt = decodeBase64(validatedVault.salt, "salt");
-  const iv = decodeBase64(validatedVault.iv, "IV");
-  const ciphertext = decodeBase64(validatedVault.ciphertext, "ciphertext");
+  const salt = decodeBase64(validatedVault.salt, "Vault salt");
+  const iv = decodeBase64(validatedVault.iv, "Vault IV");
+  const ciphertext = decodeBase64(validatedVault.ciphertext, "Vault ciphertext");
 
   if (salt.length !== SALT_LENGTH || iv.length !== IV_LENGTH) {
     throw new TypeError("Vault salt or IV has an invalid length");
@@ -142,30 +144,4 @@ function validateVault(value: unknown): EncryptedVault {
   };
 }
 
-function encodeBase64(bytes: Uint8Array): string {
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary);
-}
 
-function decodeBase64(
-  value: string,
-  field: string,
-): Uint8Array<ArrayBuffer> {
-  if (
-    value.length === 0 ||
-    value.length % 4 !== 0 ||
-    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(
-      value,
-    )
-  ) {
-    throw new TypeError(`Vault ${field} is not valid base64`);
-  }
-
-  const binary = atob(value);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  return bytes;
-}

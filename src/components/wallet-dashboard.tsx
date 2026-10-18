@@ -78,9 +78,18 @@ export function WalletDashboard() {
           <p className="eyebrow">{chain.name} wallet</p>
           <h1>Your wallet</h1>
         </div>
-        <button className="button button-outline" onClick={lockWallet} type="button">
-          Lock wallet
-        </button>
+        <div className="dashboard-heading-actions">
+          <Link className="text-link" href="/settings">
+            Settings
+          </Link>
+          <button
+            className="button button-outline"
+            onClick={lockWallet}
+            type="button"
+          >
+            Lock wallet
+          </button>
+        </div>
       </section>
 
       {isTestnet ? null : (

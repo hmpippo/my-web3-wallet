@@ -1,17 +1,29 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ACCOUNT_METADATA_STORAGE_KEY,
+  BIOMETRIC_VAULT_STORAGE_KEY,
   storageService,
   VAULT_STORAGE_KEY,
   type WalletAccountMetadata,
 } from "./storage";
 import type { EncryptedVault } from "./crypto";
+import type { BiometricVault } from "./biometric-vault";
 
 const testVault: EncryptedVault = {
   version: 1,
   salt: "c2FsdA==",
   iv: "aXY=",
   ciphertext: "Y2lwaGVydGV4dA==",
+};
+const testBiometricVault: BiometricVault = {
+  version: 1,
+  credentialId: "Y3JlZGVudGlhbA",
+  rpId: "localhost",
+  prfSalt: "c2FsdA==",
+  kdfSalt: "a2Rmc2FsdA==",
+  iv: "aXY=",
+  ciphertext: "Y2lwaGVydGV4dA==",
+  createdAt: 1_700_000_000_000,
 };
 const testAccountMetadata: WalletAccountMetadata = {
   version: 1,
@@ -367,5 +379,74 @@ describe("vault storage", () => {
     await expect(storageService.loadVault()).rejects.toThrow(
       "only available in a browser",
     );
+  });
+});
+
+describe("biometric vault storage", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("saves and loads the biometric vault under the fixed key", async () => {
+    const localStorage = createLocalStorageMock();
+    vi.stubGlobal("window", { localStorage });
+
+    await storageService.saveBiometricVault(testBiometricVault);
+
+    expect(localStorage.setItem).toHaveBeenCalledWith(
+      BIOMETRIC_VAULT_STORAGE_KEY,
+      JSON.stringify(testBiometricVault),
+    );
+    await expect(storageService.loadBiometricVault()).resolves.toEqual(
+      testBiometricVault,
+    );
+  });
+
+  it("returns null when no biometric vault has been saved", async () => {
+    vi.stubGlobal("window", { localStorage: createLocalStorageMock() });
+
+    await expect(storageService.loadBiometricVault()).resolves.toBeNull();
+  });
+
+  it("rejects malformed biometric vault records", async () => {
+    const localStorage = createLocalStorageMock();
+    vi.stubGlobal("window", { localStorage });
+
+    localStorage.setItem(BIOMETRIC_VAULT_STORAGE_KEY, "{");
+    await expect(storageService.loadBiometricVault()).rejects.toThrow(
+      "not valid JSON",
+    );
+
+    localStorage.setItem(
+      BIOMETRIC_VAULT_STORAGE_KEY,
+      JSON.stringify({ version: 1 }),
+    );
+    await expect(storageService.loadBiometricVault()).rejects.toThrow(
+      "invalid structure",
+    );
+  });
+
+  it("removes the biometric vault together with the wallet", async () => {
+    const localStorage = createLocalStorageMock();
+    vi.stubGlobal("window", { localStorage });
+
+    await storageService.saveBiometricVault(testBiometricVault);
+    await storageService.clearVault();
+
+    expect(localStorage.removeItem).toHaveBeenCalledWith(
+      BIOMETRIC_VAULT_STORAGE_KEY,
+    );
+    await expect(storageService.loadBiometricVault()).resolves.toBeNull();
+  });
+
+  it("clears only the biometric vault", async () => {
+    const localStorage = createLocalStorageMock();
+    vi.stubGlobal("window", { localStorage });
+
+    await storageService.saveBiometricVault(testBiometricVault);
+    await storageService.clearBiometricVault();
+
+    expect(localStorage.removeItem).toHaveBeenCalledWith(
+      BIOMETRIC_VAULT_STORAGE_KEY,
+    );
+    await expect(storageService.loadBiometricVault()).resolves.toBeNull();
   });
 });
