@@ -24,7 +24,6 @@ export function ManageAccounts() {
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
   const [draftName, setDraftName] = useState("");
   const [isSaving, setIsSaving] = useState(false);
-  const [detailIndex, setDetailIndex] = useState<number | null>(null);
 
   async function handleAddAccount() {
     setError(null);
@@ -134,7 +133,6 @@ export function ManageAccounts() {
                     onClick: () => {
                       setDraftName(account.name);
                       setEditingIndex(account.index);
-                      setDetailIndex(null);
                     },
                   },
                   {
@@ -144,10 +142,7 @@ export function ManageAccounts() {
                   },
                   {
                     label: "Detail",
-                    onClick: () =>
-                      setDetailIndex((current) =>
-                        current === account.index ? null : account.index,
-                      ),
+                    href: `/accounts/${account.index}`,
                   },
                 ]}
               />
@@ -187,11 +182,6 @@ export function ManageAccounts() {
                     </button>
                   </div>
                 </form>
-              ) : null}
-              {detailIndex === account.index ? (
-                <p className="account-detail-note" role="status">
-                  Account details are coming soon.
-                </p>
               ) : null}
             </article>
           ))}

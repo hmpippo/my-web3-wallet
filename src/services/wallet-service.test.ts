@@ -195,6 +195,36 @@ describe("WalletService", () => {
     );
   });
 
+  it("reveals an account's private key only after verifying the password", async () => {
+    const service = new WalletService({ storage: createStorage().storage });
+    await service.importWallet(TEST_MNEMONIC, "correct horse");
+    await service.addAccount();
+
+    const seed = await mnemonicToSeed(TEST_MNEMONIC);
+    const expected = deriveAccountAtIndex(seed, 1).privateKey;
+    seed.fill(0);
+
+    await expect(service.revealPrivateKey(1, "correct horse")).resolves.toBe(
+      expected,
+    );
+  });
+
+  it("refuses to reveal a key for a wrong password, unknown account, or while locked", async () => {
+    const service = new WalletService({ storage: createStorage().storage });
+
+    await expect(service.revealPrivateKey(0, "correct horse")).rejects.toThrow(
+      "Wallet is locked",
+    );
+
+    await service.importWallet(TEST_MNEMONIC, "correct horse");
+    await expect(
+      service.revealPrivateKey(0, "wrong password"),
+    ).rejects.toThrow("Unable to decrypt vault");
+    await expect(service.revealPrivateKey(5, "correct horse")).rejects.toThrow(
+      "Account does not exist",
+    );
+  });
+
   it("only signs and sends while unlocked", async () => {
     const sendTransfer = vi.fn(async () => "0x1234" as `0x${string}`);
     const service = new WalletService({

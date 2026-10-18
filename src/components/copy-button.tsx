@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { writeToClipboard } from "@/lib/clipboard";
 
 interface CopyButtonProps {
   /** Exact text placed on the clipboard. */
@@ -8,9 +9,20 @@ interface CopyButtonProps {
   /** Human-readable noun for the accessible label, e.g. "token contract address". */
   label?: string;
   className?: string;
+  /**
+   * Runs after a value is successfully copied. Lets a caller react to the copy
+   * (for example, warning that a secret now sits on the clipboard) without
+   * taking over the button's own confirmation state.
+   */
+  onCopy?: () => void;
 }
 
-export function CopyButton({ value, label, className }: CopyButtonProps) {
+export function CopyButton({
+  value,
+  label,
+  className,
+  onCopy,
+}: CopyButtonProps) {
   const [copied, setCopied] = useState(false);
   const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -30,6 +42,7 @@ export function CopyButton({ value, label, className }: CopyButtonProps) {
       return;
     }
     setCopied(true);
+    onCopy?.();
     if (resetTimer.current) clearTimeout(resetTimer.current);
     resetTimer.current = setTimeout(() => setCopied(false), 1500);
   }
@@ -67,31 +80,4 @@ export function CopyButton({ value, label, className }: CopyButtonProps) {
       </svg>
     </button>
   );
-}
-
-async function writeToClipboard(value: string): Promise<void> {
-  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(value);
-      return;
-    } catch {
-      // Fall through to the legacy path below.
-    }
-  }
-
-  if (typeof document === "undefined") {
-    throw new Error("Clipboard is not available");
-  }
-
-  const textarea = document.createElement("textarea");
-  textarea.value = value;
-  textarea.setAttribute("readonly", "");
-  textarea.style.position = "fixed";
-  textarea.style.top = "0";
-  textarea.style.opacity = "0";
-  document.body.appendChild(textarea);
-  textarea.select();
-  const succeeded = document.execCommand("copy");
-  document.body.removeChild(textarea);
-  if (!succeeded) throw new Error("Clipboard copy failed");
 }

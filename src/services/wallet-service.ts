@@ -376,6 +376,43 @@ export class WalletService {
     return this.state.address;
   }
 
+  /**
+   * Reveals one account's private key after re-verifying the vault password.
+   *
+   * The password is checked against the encrypted vault, so a wrong password
+   * throws before any key material exists in memory. The key is re-derived from
+   * the decrypted mnemonic rather than trusted from the in-memory map, and the
+   * seed buffer is wiped before returning: only the exported hex string reaches
+   * the caller.
+   */
+  async revealPrivateKey(index: number, password: string): Promise<Hex> {
+    if (!this.state.isUnlocked) {
+      throw new Error("Wallet is locked");
+    }
+    const account = this.state.accounts.find(
+      (candidate) => candidate.index === index,
+    );
+    if (!account) {
+      throw new RangeError("Account does not exist in this wallet session");
+    }
+
+    const vault = await this.storage.loadVault();
+    if (!vault) {
+      throw new Error("No wallet is stored on this device");
+    }
+    const mnemonic = await decryptVault(vault, password);
+    const seed = await mnemonicToSeed(mnemonic);
+    try {
+      const derived = deriveAccountAtIndex(seed, index);
+      if (derived.address !== account.address) {
+        throw new Error("Derived account does not match the stored account");
+      }
+      return derived.privateKey;
+    } finally {
+      seed.fill(0);
+    }
+  }
+
   async addAccount(): Promise<WalletAccount> {
     if (!this.state.isUnlocked || !this.seed) {
       throw new Error("Wallet is locked");
