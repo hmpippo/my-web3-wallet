@@ -165,13 +165,12 @@ export function TransactionHistory({ address, chainId }: TransactionHistoryProps
   return (
     <section
       className="history-card"
-      aria-labelledby="history-heading"
+      aria-label="Transaction history"
       aria-busy={isLoading}
     >
       <div className="history-heading">
         <div>
           <p className="eyebrow">{chain.name} activity</p>
-          <h2 id="history-heading">Transaction history</h2>
         </div>
       </div>
 

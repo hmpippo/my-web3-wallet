@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { ThemeScript } from "@/components/theme-script";
 import { WalletUnloadLock } from "@/components/wallet-unload-lock";
+import { DEFAULT_THEME_MODE } from "@/lib/theme";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -13,7 +14,11 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: ReactNode }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html
+      data-theme={DEFAULT_THEME_MODE}
+      lang="en"
+      suppressHydrationWarning
+    >
       <body>
         <ThemeScript />
         <WalletUnloadLock />

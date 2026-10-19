@@ -1,4 +1,5 @@
 import {
+  DEFAULT_THEME_MODE,
   THEME_ATTRIBUTE,
   THEME_STORAGE_KEY,
   isThemeMode,
@@ -17,15 +18,15 @@ type ThemeListener = () => void;
 /**
  * The theme rendered while server-rendering and during hydration.
  *
- * `localStorage` is unavailable on the server, so the markup always starts in
- * system mode. React then re-renders with the stored preference after
- * hydration; returning the client value here would cause a hydration mismatch.
- * The inline `ThemeScript` has already applied the stored theme to <html>
- * before that, so the page never flashes the wrong palette.
+ * `localStorage` is unavailable on the server, so the markup always starts with
+ * the default dark theme. React then re-renders with the stored preference
+ * after hydration; returning the client value here would cause a hydration
+ * mismatch. The inline `ThemeScript` has already applied the stored theme to
+ * <html> before that, so the page never flashes the wrong palette.
  */
 const SERVER_STATE: ThemeState = Object.freeze({
-  mode: "system",
-  resolved: "light",
+  mode: DEFAULT_THEME_MODE,
+  resolved: resolveTheme(DEFAULT_THEME_MODE, false),
 });
 
 export function getServerThemeState(): ThemeState {
@@ -112,14 +113,14 @@ export class ThemeService {
 }
 
 function readStoredMode(storageKey: string): ThemeMode {
-  if (typeof window === "undefined") return "system";
+  if (typeof window === "undefined") return DEFAULT_THEME_MODE;
   try {
     const serialized = window.localStorage.getItem(storageKey);
-    if (serialized === null) return "system";
+    if (serialized === null) return DEFAULT_THEME_MODE;
     const parsed: unknown = JSON.parse(serialized);
-    return isThemeMode(parsed) ? parsed : "system";
+    return isThemeMode(parsed) ? parsed : DEFAULT_THEME_MODE;
   } catch {
-    return "system";
+    return DEFAULT_THEME_MODE;
   }
 }
 

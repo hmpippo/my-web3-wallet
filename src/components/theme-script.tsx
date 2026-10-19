@@ -1,18 +1,22 @@
 import Script from "next/script";
-import { THEME_ATTRIBUTE, THEME_STORAGE_KEY } from "@/lib/theme";
+import {
+  DEFAULT_THEME_MODE,
+  THEME_ATTRIBUTE,
+  THEME_STORAGE_KEY,
+} from "@/lib/theme";
 
 /**
- * Applies the stored theme before the first paint.
+ * Applies the stored theme (dark by default) before the first paint.
  *
  * `beforeInteractive` places the script in the initial HTML ahead of the app
- * bundle, so a dark-mode user never sees a light flash while React hydrates.
- * It deliberately duplicates the small storage read in `themeService` to stay
- * dependency-free.
+ * bundle, so a user who chose another theme never sees a dark flash while React
+ * hydrates. It deliberately duplicates the small storage read in `themeService`
+ * to stay dependency-free.
  */
 export function ThemeScript() {
   const script = `
 (function () {
-  var mode = "system";
+  var mode = ${JSON.stringify(DEFAULT_THEME_MODE)};
   try {
     var raw = window.localStorage.getItem(${JSON.stringify(THEME_STORAGE_KEY)});
     if (raw !== null) {
@@ -22,7 +26,7 @@ export function ThemeScript() {
       }
     }
   } catch (error) {
-    /* Blocked or corrupt storage falls back to the system preference. */
+    /* Blocked or corrupt storage falls back to the default theme. */
   }
   var dark =
     mode === "dark" ||

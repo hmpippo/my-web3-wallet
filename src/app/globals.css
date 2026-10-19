@@ -1158,7 +1158,7 @@ input {
 
 .token-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(8rem, auto) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(8rem, auto);
   align-items: center;
   gap: 1rem;
   border-bottom: 1px solid var(--line);
@@ -1648,12 +1648,6 @@ input {
 
 .history-heading .eyebrow {
   margin-bottom: 0.45rem;
-}
-
-.history-heading h2 {
-  margin: 0;
-  font-size: 1.1rem;
-  letter-spacing: -0.04em;
 }
 
 .history-tabs {

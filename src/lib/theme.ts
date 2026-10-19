@@ -6,6 +6,9 @@ export const THEME_MODES = ["light", "dark", "system"] as const;
 export type ThemeMode = (typeof THEME_MODES)[number];
 export type ResolvedTheme = "light" | "dark";
 
+/** Theme used when the user has not chosen one yet. */
+export const DEFAULT_THEME_MODE: ThemeMode = "dark";
+
 /** Narrows an unknown stored value (or user input) to a supported mode. */
 export function isThemeMode(value: unknown): value is ThemeMode {
   return (

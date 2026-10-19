@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { formatUnits, type Address } from "viem";
 import { getWalletChain } from "@/core/chain";
@@ -165,11 +164,10 @@ export function TokenPortfolio({
   }, [accountAddress, chainId, visibleTokens, native.decimals, native.symbol]);
 
   return (
-    <section className="history-card token-card" aria-labelledby="tokens-heading">
+    <section className="history-card token-card" aria-label="Tokens">
       <div className="history-heading">
         <div>
           <p className="eyebrow">{chain.name} assets</p>
-          <h2 id="tokens-heading">Tokens</h2>
         </div>
         <OverflowMenu
           label="Token list options"
@@ -207,11 +205,6 @@ export function TokenPortfolio({
               </strong>
             )}
           </div>
-          <div className="token-actions">
-            <Link className="text-link" href="/send">
-              Send
-            </Link>
-          </div>
         </li>
         {visibleTokens.map((token) => {
           const balance = balances[token.address.toLowerCase()];
@@ -247,14 +240,6 @@ export function TokenPortfolio({
                     {balance.formatted} {token.symbol}
                   </strong>
                 )}
-              </div>
-              <div className="token-actions">
-                <Link
-                  className="text-link"
-                  href={`/send?token=${token.address}`}
-                >
-                  Send
-                </Link>
               </div>
             </li>
           );

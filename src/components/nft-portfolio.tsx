@@ -50,11 +50,10 @@ export function NftPortfolio({ chainId, nfts }: NftPortfolioProps) {
   }
 
   return (
-    <section className="history-card nft-card" aria-labelledby="nfts-heading">
+    <section className="history-card nft-card" aria-label="NFTs">
       <div className="history-heading">
         <div>
           <p className="eyebrow">{chain.name} assets</p>
-          <h2 id="nfts-heading">NFTs</h2>
         </div>
         <OverflowMenu
           label="NFT list options"

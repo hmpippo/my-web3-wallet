@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { isThemeMode, resolveTheme } from "./theme";
+import { DEFAULT_THEME_MODE, isThemeMode, resolveTheme } from "./theme";
 
 describe("theme helpers", () => {
+  it("defaults to the dark theme", () => {
+    expect(DEFAULT_THEME_MODE).toBe("dark");
+  });
+
   it("accepts the three supported modes", () => {
     expect(isThemeMode("light")).toBe(true);
     expect(isThemeMode("dark")).toBe(true);

@@ -165,12 +165,12 @@ network, and the send form only offers assets tracked on the active chain.
 
 The header's theme menu switches the whole app between light, dark, and
 follow-system. The choice is a display-only preference stored in
-`wallet_theme_v1`; like the network selection it never touches keys or the
-vault, and it is kept across locks and reloads. System mode follows the OS
-`prefers-color-scheme` setting live and updates when another tab changes the
-preference. A tiny inline script applies the stored palette before the first
-paint, so a dark-mode user does not see a flash of the light theme while the
-app hydrates.
+`wallet_theme_v1` and defaults to dark; like the network selection it never
+touches keys or the vault, and it is kept across locks and reloads. System mode
+follows the OS `prefers-color-scheme` setting live and updates when another tab
+changes the preference. A tiny inline script applies the stored palette before
+the first paint, so a user who chose light does not see a flash of the dark
+theme while the app hydrates.
 
 ## Transaction history
 
