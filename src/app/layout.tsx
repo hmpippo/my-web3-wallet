@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
+import { ThemeScript } from "@/components/theme-script";
 import { WalletUnloadLock } from "@/components/wallet-unload-lock";
 import "./globals.css";
 
@@ -12,8 +13,9 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: ReactNode }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <body>
+        <ThemeScript />
         <WalletUnloadLock />
         {children}
       </body>

@@ -15,6 +15,9 @@ describe("home page shell", () => {
     expect(markup).toContain("Create wallet");
     expect(markup).toContain("Import wallet");
     expect(markup).toContain("Import private key");
+    // No device wallets means no wallet cards, only the actions.
+    expect(markup).not.toContain("Your wallets");
+    expect(markup).not.toContain("Imported accounts");
     expect(markup).toContain(
       "Never enter a recovery phrase you use for real funds.",
     );

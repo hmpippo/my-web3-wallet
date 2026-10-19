@@ -10,6 +10,7 @@ import {
 } from "react";
 import type { Hex } from "viem";
 import { CopyButton } from "@/components/copy-button";
+import { PasswordInput } from "@/components/password-input";
 import { clearClipboard } from "@/lib/clipboard";
 import { useActiveChain } from "@/lib/use-active-chain";
 import { walletService } from "@/services/wallet-service";
@@ -49,7 +50,6 @@ export function RevealPrivateKey() {
     null,
   );
   const [password, setPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
   const [isKeyVisible, setIsKeyVisible] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -94,7 +94,6 @@ export function RevealPrivateKey() {
     try {
       const key = await walletService.revealPrivateKey(index, password);
       setPassword("");
-      setShowPassword(false);
       setIsKeyVisible(false);
       setClipboardState("idle");
       setUnlocked({ path: pathname, key });
@@ -136,24 +135,13 @@ export function RevealPrivateKey() {
           <form className="wallet-form" onSubmit={unlock}>
             <label className="form-field">
               Password
-              <span className="password-input-wrapper">
-                <input
-                  autoComplete="current-password"
-                  onChange={(event) => setPassword(event.target.value)}
-                  required
-                  type={showPassword ? "text" : "password"}
-                  value={password}
-                />
-                <button
-                  aria-label={showPassword ? "Hide password" : "Show password"}
-                  aria-pressed={showPassword}
-                  className="password-visibility"
-                  onClick={() => setShowPassword((visible) => !visible)}
-                  type="button"
-                >
-                  <EyeIcon crossed={showPassword} />
-                </button>
-              </span>
+              <PasswordInput
+                aria-label="Password"
+                autoComplete="current-password"
+                onChange={(event) => setPassword(event.target.value)}
+                required
+                value={password}
+              />
             </label>
             <div className="form-actions">
               <button

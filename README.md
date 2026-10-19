@@ -31,6 +31,7 @@ Open [http://localhost:3000](http://localhost:3000) to view the app.
 - `src/core/storage.ts` — encrypted vault, biometric unlock vault, and public account metadata storage
 - `src/core/chain.ts` — supported-chain registry, per-chain RPC resolution, and cached viem public clients
 - `src/services/chain-service.ts` — persisted active-chain store for the network switcher
+- `src/services/theme-service.ts` — persisted light/dark/system theme store
 - `src/services/wallet-service.ts` — create, import, unlock (password or biometric), lock, and send lifecycle
 - `src/services/transaction-service.ts` — estimated-gas native transfers with viem
 - `src/services/balance-service.ts` — native balance reads for the active chain
@@ -41,6 +42,7 @@ Open [http://localhost:3000](http://localhost:3000) to view the app.
 - `src/services/account-abstraction-service.ts` — EIP-7702 delegation reads and revocation
 - `src/app/api/transactions/route.ts` — validated same-origin history endpoint
 - `src/lib/address.ts` — address truncation for display
+- `src/lib/theme.ts` — theme-mode validation and light/dark resolution
 - `src/lib/base64.ts` — shared base64 and base64url helpers for vaults and credentials
 - `src/lib/clipboard.ts` — clipboard writes with an `execCommand` fallback
 - `src/lib/use-active-chain.ts` — React hook that subscribes to the persisted active-chain store
@@ -158,6 +160,17 @@ Tokens and NFTs are stored per account and tagged with their chain. Entries
 saved before multi-chain support (which had no chain) are treated as Sepolia.
 Switching chains filters the portfolio, balances, and activity feed to that
 network, and the send form only offers assets tracked on the active chain.
+
+## Appearance
+
+The header's theme menu switches the whole app between light, dark, and
+follow-system. The choice is a display-only preference stored in
+`wallet_theme_v1`; like the network selection it never touches keys or the
+vault, and it is kept across locks and reloads. System mode follows the OS
+`prefers-color-scheme` setting live and updates when another tab changes the
+preference. A tiny inline script applies the stored palette before the first
+paint, so a dark-mode user does not see a flash of the light theme while the
+app hydrates.
 
 ## Transaction history
 

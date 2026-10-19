@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { walletService } from "@/services/wallet-service";
 import { getErrorMessage } from "@/components/mnemonic-import-form";
+import { PasswordInput } from "@/components/password-input";
 
 /**
  * Imports a single private key as its own wallet.
@@ -18,7 +19,6 @@ import { getErrorMessage } from "@/components/mnemonic-import-form";
 export function PrivateKeyImportForm() {
   const router = useRouter();
   const [privateKey, setPrivateKey] = useState("");
-  const [showKey, setShowKey] = useState(false);
   const [password, setPassword] = useState("");
   const [passwordConfirmation, setPasswordConfirmation] = useState("");
   const [isBusy, setIsBusy] = useState(false);
@@ -38,7 +38,6 @@ export function PrivateKeyImportForm() {
       setPrivateKey("");
       setPassword("");
       setPasswordConfirmation("");
-      setShowKey(false);
       router.replace("/wallet");
     } catch (caught) {
       setError(
@@ -62,49 +61,39 @@ export function PrivateKeyImportForm() {
       <form className="wallet-form" onSubmit={importPrivateKey}>
         <label className="form-field">
           Private key
-          <span className="password-input-wrapper">
-            <input
-              autoComplete="off"
-              onChange={(event) => setPrivateKey(event.target.value)}
-              placeholder="0x…"
-              required
-              spellCheck={false}
-              type={showKey ? "text" : "password"}
-              value={privateKey}
-            />
-            <button
-              aria-label={showKey ? "Hide private key" : "Show private key"}
-              aria-pressed={showKey}
-              className="password-visibility"
-              onClick={() => setShowKey((visible) => !visible)}
-              type="button"
-            >
-              <EyeIcon crossed={showKey} />
-            </button>
-          </span>
+          <PasswordInput
+            aria-label="Private key"
+            autoComplete="off"
+            onChange={(event) => setPrivateKey(event.target.value)}
+            placeholder="0x…"
+            required
+            revealLabel="private key"
+            spellCheck={false}
+            value={privateKey}
+          />
           <span className="field-help">
             A 64-character hexadecimal key, with or without the 0x prefix.
           </span>
         </label>
         <label className="form-field">
           Password
-          <input
+          <PasswordInput
+            aria-label="Password"
             autoComplete="new-password"
             minLength={8}
             onChange={(event) => setPassword(event.target.value)}
             required
-            type="password"
             value={password}
           />
           <span className="field-help">Use at least 8 characters.</span>
         </label>
         <label className="form-field">
           Confirm password
-          <input
+          <PasswordInput
+            aria-label="Confirm password"
             autoComplete="new-password"
             onChange={(event) => setPasswordConfirmation(event.target.value)}
             required
-            type="password"
             value={passwordConfirmation}
           />
         </label>
@@ -127,35 +116,5 @@ export function PrivateKeyImportForm() {
         </p>
       )}
     </section>
-  );
-}
-
-/** Eye icon that draws a slash when `crossed`, matching the password fields. */
-function EyeIcon({ crossed }: { crossed: boolean }) {
-  return (
-    <svg
-      aria-hidden="true"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      viewBox="0 0 24 24"
-    >
-      {crossed ? (
-        <path
-          d="M3 3l18 18M10.6 10.6a2 2 0 002.8 2.8M9.9 5.2A11.5 11.5 0 0112 5c5 0 8.5 4.5 9.5 7-.4 1.1-1.2 2.2-2.2 3.2M6.2 6.2C3.9 7.7 2.8 10 2.5 12c1 2.5 4.5 7 9.5 7 1.1 0 2.1-.2 3-.6"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      ) : (
-        <>
-          <path
-            d="M2.5 12S6 5 12 5s9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7z"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-          <circle cx="12" cy="12" r="3" />
-        </>
-      )}
-    </svg>
   );
 }

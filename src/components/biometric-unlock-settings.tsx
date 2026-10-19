@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { walletService } from "@/services/wallet-service";
+import { PasswordInput } from "@/components/password-input";
 
 type BiometricStatus = "loading" | "unsupported" | "enabled" | "disabled";
 
@@ -101,11 +102,11 @@ export function BiometricUnlockSettings() {
           <form className="wallet-form" onSubmit={enable}>
             <label className="form-field">
               Confirm your password
-              <input
+              <PasswordInput
+                aria-label="Confirm your password"
                 autoComplete="current-password"
                 onChange={(event) => setPassword(event.target.value)}
                 required
-                type="password"
                 value={password}
               />
               <span className="field-help">

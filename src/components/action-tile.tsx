@@ -11,7 +11,7 @@ export type ActionIconName =
 
 interface ActionTilesProps {
   children: ReactNode;
-  /** Extra class names, e.g. `action-tiles-compact` inside card footers. */
+  /** Extra class names, e.g. `dashboard-actions` on the wallet dashboard. */
   className?: string;
 }
 
@@ -45,6 +45,38 @@ export function ActionTile({ href, icon, label, description }: ActionTileProps) 
           <span className="action-tile-description">{description}</span>
         ) : null}
       </span>
+    </Link>
+  );
+}
+
+interface MainActionProps {
+  href: string;
+  icon: ActionIconName;
+  label: string;
+}
+
+/**
+ * The home screen's primary actions.
+ *
+ * Unlike `ActionTile`, the link box is exactly the green icon square: the label
+ * is positioned outside the box and ignores pointer events, so there is no
+ * invisible clickable area around the button.
+ */
+export function MainActions({ children }: { children: ReactNode }) {
+  return (
+    <nav aria-label="Wallet actions" className="main-actions">
+      {children}
+    </nav>
+  );
+}
+
+export function MainAction({ href, icon, label }: MainActionProps) {
+  return (
+    <Link className="main-action" href={href}>
+      <span className="main-action-icon">
+        <ActionIcon name={icon} />
+      </span>
+      <span className="main-action-label">{label}</span>
     </Link>
   );
 }

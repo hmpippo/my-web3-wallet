@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { walletService } from "@/services/wallet-service";
+import { PasswordInput } from "@/components/password-input";
 
 export function CreateWalletForm() {
   const router = useRouter();
@@ -103,23 +104,23 @@ export function CreateWalletForm() {
           </label>
           <label className="form-field">
             Password
-            <input
+            <PasswordInput
+              aria-label="Password"
               autoComplete="new-password"
               minLength={8}
               onChange={(event) => setPassword(event.target.value)}
               required
-              type="password"
               value={password}
             />
             <span className="field-help">Use at least 8 characters.</span>
           </label>
           <label className="form-field">
             Confirm password
-            <input
+            <PasswordInput
+              aria-label="Confirm password"
               autoComplete="new-password"
               onChange={(event) => setPasswordConfirmation(event.target.value)}
               required
-              type="password"
               value={passwordConfirmation}
             />
           </label>

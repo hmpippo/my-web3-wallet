@@ -85,9 +85,6 @@ export function WalletDashboard() {
           <h1>Your wallet</h1>
         </div>
         <div className="dashboard-heading-actions">
-          <Link className="text-link" href="/">
-            Wallets
-          </Link>
           <Link className="text-link" href="/settings">
             Settings
           </Link>

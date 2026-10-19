@@ -11,7 +11,8 @@ import {
 import type { StoredWalletSummary } from "@/core/storage";
 import { walletService } from "@/services/wallet-service";
 import { OverflowMenu } from "@/components/overflow-menu";
-import { ActionTile, ActionTiles } from "@/components/action-tile";
+import { MainAction, MainActions } from "@/components/action-tile";
+import { PasswordInput } from "@/components/password-input";
 
 /**
  * Home-screen wallet manager. Recovery-phrase wallets and single-account
@@ -200,12 +201,11 @@ export function WalletManager() {
             <label htmlFor={`wallet-delete-${wallet.id}`}>
               Enter its password to delete
             </label>
-            <input
+            <PasswordInput
               autoComplete="current-password"
               id={`wallet-delete-${wallet.id}`}
               onChange={(event) => setDeletePassword(event.target.value)}
               required
-              type="password"
               value={deletePassword}
             />
             <div className="account-row-actions">
@@ -236,103 +236,61 @@ export function WalletManager() {
 
   return (
     <>
-      {wallets.length > 0 ? (
+      <MainActions>
+        <MainAction href="/create" icon="create" label="Create wallet" />
+        <MainAction href="/import" icon="import" label="Import wallet" />
+        <MainAction
+          href="/import/private-key"
+          icon="key"
+          label="Import private key"
+        />
+      </MainActions>
+
+      {error ? (
+        <p className="form-error home-error" role="alert">
+          {error}
+        </p>
+      ) : null}
+
+      {phraseWallets.length > 0 || importedWallets.length > 0 ? (
         <div className="wallet-manager-groups">
-          <section className="form-card" aria-labelledby="wallets-title">
-            <p className="eyebrow">On this device</p>
-            <h1 id="wallets-title">Your wallets</h1>
-            <p className="muted-copy">
-              Each wallet has its own recovery phrase and password. Select one to
-              unlock its accounts.
-            </p>
-
-            {error ? (
-              <p className="form-error" role="alert">
-                {error}
+          {phraseWallets.length > 0 ? (
+            <section className="form-card" aria-labelledby="wallets-title">
+              <p className="eyebrow">On this device</p>
+              <h1 id="wallets-title">Your wallets</h1>
+              <p className="muted-copy">
+                Each wallet has its own recovery phrase and password. Select one
+                to unlock its accounts.
               </p>
-            ) : null}
 
-            {phraseWallets.length > 0 ? (
               <section
                 aria-label="Wallets on this device"
                 className="account-management-panel"
               >
                 {phraseWallets.map((wallet) => renderWalletRow(wallet))}
               </section>
-            ) : (
+            </section>
+          ) : null}
+
+          {importedWallets.length > 0 ? (
+            <section className="form-card" aria-labelledby="imported-title">
+              <p className="eyebrow">On this device</p>
+              <h2 id="imported-title">Imported accounts</h2>
               <p className="muted-copy">
-                No recovery-phrase wallets on this device yet.
+                Private keys imported as their own single-account wallets.
+                Select one to unlock it.
               </p>
-            )}
 
-            <ActionTiles className="action-tiles-compact card-actions">
-              <ActionTile href="/create" icon="create" label="Create wallet" />
-              <ActionTile href="/import" icon="import" label="Import wallet" />
-            </ActionTiles>
-          </section>
-
-          <section className="form-card" aria-labelledby="imported-title">
-            <p className="eyebrow">On this device</p>
-            <h2 id="imported-title">Imported accounts</h2>
-            <p className="muted-copy">
-              Private keys imported as their own single-account wallets. Select
-              one to unlock it.
-            </p>
-
-            {importedWallets.length > 0 ? (
               <section
                 aria-label="Imported accounts on this device"
                 className="account-management-panel"
               >
                 {importedWallets.map((wallet) => renderWalletRow(wallet))}
               </section>
-            ) : (
-              <p className="muted-copy">No imported accounts on this device.</p>
-            )}
-
-            <ActionTiles className="action-tiles-compact card-actions">
-              <ActionTile
-                href="/import/private-key"
-                icon="key"
-                label="Import private key"
-              />
-            </ActionTiles>
-          </section>
+            </section>
+          ) : null}
         </div>
-      ) : (
-        <section className="setup-panel" aria-labelledby="start-title">
-          <div className="section-heading">
-            <div>
-              <p className="eyebrow">Get started</p>
-              <h2 id="start-title">Choose how to begin</h2>
-            </div>
-            <span className="preview-label">Self-custody</span>
-          </div>
-
-          <div className="setup-body">
-            <ActionTiles>
-              <ActionTile
-                description="Generate a recovery phrase and protect it with a password."
-                href="/create"
-                icon="create"
-                label="Create wallet"
-              />
-              <ActionTile
-                description="Restore from a 12 or 24-word recovery phrase."
-                href="/import"
-                icon="import"
-                label="Import wallet"
-              />
-              <ActionTile
-                description="Add a single private key as its own standalone account."
-                href="/import/private-key"
-                icon="key"
-                label="Import private key"
-              />
-            </ActionTiles>
-          </div>
-        </section>
-      )}
+      ) : null}
 
       <aside className="preview-note">
         <span className="status-dot" aria-hidden="true" />
