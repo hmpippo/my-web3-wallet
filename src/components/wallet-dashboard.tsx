@@ -10,7 +10,7 @@ import {
   selectAccountTokens,
   walletService,
 } from "@/services/wallet-service";
-import { ActionTile, ActionTiles } from "@/components/action-tile";
+import { MainAction, MainActions } from "@/components/action-tile";
 import { CopyButton } from "@/components/copy-button";
 import { TransactionHistory } from "@/components/transaction-history";
 import { TokenPortfolio } from "@/components/token-portfolio";
@@ -142,15 +142,15 @@ export function WalletDashboard() {
             <CopyButton label="your address" value={address} />
           </div>
         ) : null}
-        <ActionTiles className="dashboard-actions">
-          <ActionTile href="/send" icon="send" label="Send" />
-          <ActionTile href="/receive" icon="receive" label="Receive" />
-          <ActionTile
+        <MainActions ariaLabel="Account actions" className="dashboard-actions">
+          <MainAction href="/send" icon="send" label="Send" />
+          <MainAction href="/receive" icon="receive" label="Receive" />
+          <MainAction
             href="/account-abstraction"
             icon="abstract"
             label="Account Abstract"
           />
-        </ActionTiles>
+        </MainActions>
       </section>
       <div className="portfolio-tabs" role="tablist" aria-label="Wallet overview">
         <button

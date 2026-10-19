@@ -9,62 +9,37 @@ export type ActionIconName =
   | "import"
   | "key";
 
-interface ActionTilesProps {
-  children: ReactNode;
-  /** Extra class names, e.g. `dashboard-actions` on the wallet dashboard. */
-  className?: string;
-}
-
-interface ActionTileProps {
-  href: string;
-  icon: ActionIconName;
-  label: string;
-  /** Optional helper line shown under the label. */
-  description?: string;
-}
-
-/** A row of equal-width action tiles. */
-export function ActionTiles({ children, className }: ActionTilesProps) {
-  return (
-    <div className={`action-tiles${className ? ` ${className}` : ""}`}>
-      {children}
-    </div>
-  );
-}
-
-/** A rounded icon square with its label (and optional hint) underneath. */
-export function ActionTile({ href, icon, label, description }: ActionTileProps) {
-  return (
-    <Link className="action-tile" href={href}>
-      <span className="action-tile-icon">
-        <ActionIcon name={icon} />
-      </span>
-      <span className="action-tile-copy">
-        <span className="action-tile-label">{label}</span>
-        {description ? (
-          <span className="action-tile-description">{description}</span>
-        ) : null}
-      </span>
-    </Link>
-  );
-}
-
 interface MainActionProps {
   href: string;
   icon: ActionIconName;
   label: string;
 }
 
+interface MainActionsProps {
+  children: ReactNode;
+  /** Accessible name for the group, e.g. "Wallet actions". */
+  ariaLabel?: string;
+  /** Extra class names, e.g. `dashboard-actions`. */
+  className?: string;
+}
+
 /**
- * The home screen's primary actions.
+ * A row of primary actions.
  *
- * Unlike `ActionTile`, the link box is exactly the green icon square: the label
- * is positioned outside the box and ignores pointer events, so there is no
- * invisible clickable area around the button.
+ * Each link's box is exactly the green icon square: the label is positioned
+ * outside the box and ignores pointer events, so there is no invisible
+ * clickable area around the button.
  */
-export function MainActions({ children }: { children: ReactNode }) {
+export function MainActions({
+  ariaLabel = "Wallet actions",
+  children,
+  className,
+}: MainActionsProps) {
   return (
-    <nav aria-label="Wallet actions" className="main-actions">
+    <nav
+      aria-label={ariaLabel}
+      className={`main-actions${className ? ` ${className}` : ""}`}
+    >
       {children}
     </nav>
   );
