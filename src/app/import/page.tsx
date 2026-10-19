@@ -1,4 +1,4 @@
-import { ImportWalletForm } from "@/components/import-wallet-form";
+import { MnemonicImportForm } from "@/components/mnemonic-import-form";
 import { SiteHeader } from "@/components/site-header";
 
 export default function ImportPage() {
@@ -6,7 +6,7 @@ export default function ImportPage() {
     <>
       <SiteHeader />
       <main className="page-main form-page">
-        <ImportWalletForm />
+        <MnemonicImportForm />
       </main>
     </>
   );

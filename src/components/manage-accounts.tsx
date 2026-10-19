@@ -140,6 +140,7 @@ export function ManageAccounts() {
                 items={[
                   {
                     label: "Rename",
+                    icon: "rename",
                     onClick: () => {
                       setDraftName(account.name);
                       setEditingIndex(account.index);
@@ -147,11 +148,13 @@ export function ManageAccounts() {
                   },
                   {
                     label: account.hidden ? "Show" : "Hide",
+                    icon: account.hidden ? "show" : "hide",
                     onClick: () =>
                       void handleSetVisibility(account.index, account.hidden),
                   },
                   {
                     label: "Detail",
+                    icon: "detail",
                     href: `/accounts/${account.index}`,
                   },
                 ]}

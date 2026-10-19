@@ -72,15 +72,6 @@ input {
   font-size: 0.95rem;
 }
 
-.header-nav {
-  display: flex;
-  align-items: center;
-  gap: 1.5rem;
-  color: var(--muted);
-  font-size: 0.875rem;
-}
-
-.header-nav a:hover,
 .text-button:hover,
 .preview-note a:hover {
   color: var(--accent);
@@ -163,36 +154,14 @@ input {
   white-space: nowrap;
 }
 
-.setup-option {
-  display: grid;
-  grid-template-columns: 2rem 1fr auto;
-  align-items: start;
-  gap: 1rem;
-  padding: 1.5rem 2rem;
-  border-top: 1px solid var(--line);
-}
-
-.option-number {
-  padding-top: 0.12rem;
-  color: #93a198;
-  font-family: var(--font-mono);
-  font-size: 0.8rem;
-}
-
-.setup-option h3 {
-  margin: 0;
-  font-size: 1rem;
-}
-
-.setup-option p {
-  max-width: 380px;
-  margin: 0.5rem 0 0;
-  color: var(--muted);
-  font-size: 0.875rem;
-  line-height: 1.55;
+.setup-body {
+  padding: 0 2rem 2rem;
 }
 
 .button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 2.5rem;
   border: 0;
   border-radius: 0.65rem;
@@ -243,6 +212,79 @@ input {
 .button-outline:disabled {
   color: #8a958e;
   cursor: not-allowed;
+}
+
+.action-tiles {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 0.75rem;
+}
+
+/* Card footers keep tiles at a comfortable width instead of stretching them. */
+.action-tiles-compact {
+  grid-auto-columns: minmax(0, 14rem);
+  justify-content: start;
+}
+
+.action-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: var(--surface);
+  padding: 1.1rem 0.85rem;
+  color: var(--foreground);
+  text-align: center;
+  text-decoration: none;
+  transition:
+    border-color 120ms ease,
+    background 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.action-tile:hover {
+  border-color: #a7beb0;
+  background: #f6faf7;
+  box-shadow: 0 0.6rem 1.4rem rgb(27 54 39 / 6%);
+}
+
+.action-tile-icon {
+  display: grid;
+  place-items: center;
+  width: 3rem;
+  height: 3rem;
+  border-radius: 0.9rem;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.action-tile-icon svg {
+  width: 1.5rem;
+  height: 1.5rem;
+}
+
+.action-tile-copy {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.action-tile-label {
+  font-size: 0.85rem;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.action-tile-description {
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.card-actions {
+  margin-top: 1.5rem;
 }
 
 .text-link {
@@ -401,6 +443,20 @@ input {
 }
 
 .form-card h1 {
+  margin: 0 0 0.8rem;
+  font-size: clamp(1.8rem, 5vw, 2.5rem);
+  letter-spacing: -0.06em;
+}
+
+/* The wallet manager stacks a recovery-phrase card and an imported-accounts
+   card; give them breathing room and match the primary heading scale so the two
+   groups read as equal peers. */
+.wallet-manager-groups {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.wallet-manager-groups h2 {
   margin: 0 0 0.8rem;
   font-size: clamp(1.8rem, 5vw, 2.5rem);
   letter-spacing: -0.06em;
@@ -842,17 +898,7 @@ input {
 }
 
 .dashboard-actions {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 0.75rem;
   margin-top: 1.5rem;
-}
-
-/* The wallet overview CTA row spaces itself; cancel the generic card margin. */
-.dashboard-actions .button {
-  min-height: 3.25rem;
-  margin-top: 0;
-  font-size: 1rem;
 }
 
 .receive-card {
@@ -1232,6 +1278,9 @@ input {
 }
 
 .overflow-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
   border: 0;
   border-radius: 0.5rem;
   background: transparent;
@@ -1247,6 +1296,31 @@ input {
 
 .overflow-menu-item:hover {
   background: #f1f5f2;
+}
+
+.overflow-menu-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 1rem;
+  height: 1rem;
+  color: var(--muted);
+}
+
+.overflow-menu-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.overflow-menu-item-danger {
+  color: #b3261e;
+}
+
+.overflow-menu-item-danger .overflow-menu-icon {
+  color: #b3261e;
+}
+
+.overflow-menu-item-danger:hover {
+  background: #fbeceb;
 }
 
 .nft-card {
@@ -1781,14 +1855,26 @@ input {
     padding: 1.4rem 1.25rem;
   }
 
-  .setup-option {
-    grid-template-columns: 1.5rem 1fr;
-    padding: 1.25rem;
+  .setup-body {
+    padding: 0 1.25rem 1.25rem;
   }
 
-  .setup-option .button {
-    grid-column: 2;
-    justify-self: start;
+  .action-tiles {
+    gap: 0.5rem;
+  }
+
+  .action-tile {
+    gap: 0.55rem;
+    padding: 0.85rem 0.4rem;
+  }
+
+  .action-tile-icon {
+    width: 2.6rem;
+    height: 2.6rem;
+  }
+
+  .action-tile-description {
+    display: none;
   }
 
   .returning-user {
@@ -1870,10 +1956,6 @@ input {
     grid-row: 1 / span 2;
     flex-direction: column;
     align-items: flex-end;
-  }
-
-  .dashboard-actions {
-    grid-template-columns: 1fr;
   }
 
   .history-heading {

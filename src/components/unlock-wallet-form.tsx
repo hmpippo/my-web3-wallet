@@ -21,6 +21,18 @@ export function UnlockWalletForm() {
   const selectedWallet = wallets.find(
     (wallet) => wallet.id === walletState.selectedWalletId,
   );
+  // Group the picker the same way the home manager does. A legend only helps
+  // when more than one group is present.
+  const walletGroups = [
+    {
+      label: "Wallets",
+      wallets: wallets.filter((wallet) => wallet.kind !== "privateKey"),
+    },
+    {
+      label: "Imported accounts",
+      wallets: wallets.filter((wallet) => wallet.kind === "privateKey"),
+    },
+  ].filter((group) => group.wallets.length > 0);
 
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -143,11 +155,21 @@ export function UnlockWalletForm() {
             onChange={(event) => void handleWalletChange(event.target.value)}
             value={walletState.selectedWalletId ?? ""}
           >
-            {wallets.map((wallet) => (
-              <option key={wallet.id} value={wallet.id}>
-                {wallet.name}
-              </option>
-            ))}
+            {walletGroups.length > 1
+              ? walletGroups.map((group) => (
+                  <optgroup key={group.label} label={group.label}>
+                    {group.wallets.map((wallet) => (
+                      <option key={wallet.id} value={wallet.id}>
+                        {wallet.name}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))
+              : walletGroups[0]?.wallets.map((wallet) => (
+                  <option key={wallet.id} value={wallet.id}>
+                    {wallet.name}
+                  </option>
+                ))}
           </select>
         </div>
       ) : null}

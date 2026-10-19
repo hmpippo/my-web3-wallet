@@ -502,7 +502,7 @@ describe("wallet registry storage", () => {
     await expect(storageService.loadRegistry()).resolves.toBeNull();
   });
 
-  it("round-trips a wallet's kind and address fingerprint", async () => {
+  it("round-trips a wallet's kind", async () => {
     vi.stubGlobal("window", { localStorage: createLocalStorageMock() });
     const registry: WalletRegistry = {
       version: 1,
@@ -512,7 +512,6 @@ describe("wallet registry storage", () => {
           name: "Imported key 1",
           createdAt: 1_700_000_000_000,
           kind: "privateKey",
-          addressFingerprint: "a".repeat(64),
         },
       ],
       selectedId: WALLET_ID,
@@ -523,7 +522,7 @@ describe("wallet registry storage", () => {
     await expect(storageService.loadRegistry()).resolves.toEqual(registry);
   });
 
-  it("rejects an unknown kind or malformed fingerprint", async () => {
+  it("rejects an unknown kind", async () => {
     const localStorage = createLocalStorageMock();
     vi.stubGlobal("window", { localStorage });
 
@@ -537,25 +536,6 @@ describe("wallet registry storage", () => {
             name: "Wallet 1",
             createdAt: 1,
             kind: "seedless",
-          },
-        ],
-        selectedId: WALLET_ID,
-      }),
-    );
-    await expect(storageService.loadRegistry()).rejects.toThrow(
-      "invalid wallet",
-    );
-
-    localStorage.setItem(
-      WALLET_REGISTRY_STORAGE_KEY,
-      JSON.stringify({
-        version: 1,
-        wallets: [
-          {
-            id: WALLET_ID,
-            name: "Wallet 1",
-            createdAt: 1,
-            addressFingerprint: "not-a-hash",
           },
         ],
         selectedId: WALLET_ID,

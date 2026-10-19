@@ -174,8 +174,8 @@ export function TokenPortfolio({
         <OverflowMenu
           label="Token list options"
           items={[
-            { label: "Refresh list", onClick: refreshList },
-            { label: "Manage tokens", href: "/tokens" },
+            { label: "Refresh list", icon: "refresh", onClick: refreshList },
+            { label: "Manage tokens", icon: "manage", href: "/tokens" },
           ]}
         />
       </div>

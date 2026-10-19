@@ -6,9 +6,9 @@ import { useState, type FormEvent } from "react";
 import { walletService } from "@/services/wallet-service";
 
 /**
- * Recovery-phrase import, rendered inside the import page's method switch.
- * The phrase is validated and encrypted on this device; it is never persisted
- * in plaintext.
+ * Recovery-phrase import. The phrase is validated and encrypted on this device;
+ * it is never persisted in plaintext. This is the only form on the import page,
+ * which is dedicated to recovery phrases (private keys import elsewhere).
  */
 export function MnemonicImportForm() {
   const router = useRouter();
@@ -41,7 +41,9 @@ export function MnemonicImportForm() {
   }
 
   return (
-    <>
+    <section className="form-card" aria-labelledby="import-title">
+      <p className="eyebrow">Restore wallet</p>
+      <h1 id="import-title">Import a wallet</h1>
       <p className="muted-copy">
         Your recovery phrase is processed on this device and saved only in
         encrypted form.
@@ -99,7 +101,7 @@ export function MnemonicImportForm() {
           {error}
         </p>
       )}
-    </>
+    </section>
   );
 }
 

@@ -1450,12 +1450,10 @@ describe("WalletService biometric unlock", () => {
   });
 });
 
-// The private key of a distinct account (Hardhat account 1) and of the mnemonic
-// wallet's account 0 (Hardhat account 0), used by the import tests below.
+// The private key of a distinct account (Hardhat account 1), used by the
+// import tests below.
 const IMPORTED_PRIVATE_KEY =
   "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
-const ACCOUNT_ZERO_PRIVATE_KEY =
-  "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
 describe("WalletService private key import", () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -1558,36 +1556,12 @@ describe("WalletService private key import", () => {
     expect(service.getState()).toMatchObject(LOCKED_STATE);
   });
 
-  it("blocks a key already imported on this device even while locked", async () => {
-    const { storage, getRegistry } = createStorage();
-    const service = new WalletService({ storage });
-    await service.importPrivateKey(IMPORTED_PRIVATE_KEY, "correct horse");
-    service.lock();
-
-    await expect(
-      service.importPrivateKey(IMPORTED_PRIVATE_KEY, "another password"),
-    ).rejects.toThrow("already been imported");
-    expect(getRegistry()?.wallets).toHaveLength(1);
-  });
-
-  it("blocks importing the key behind an existing unlocked account", async () => {
-    const service = new WalletService({ storage: createStorage().storage });
-    await service.importWallet(TEST_MNEMONIC, "correct horse");
-
-    await expect(
-      service.importPrivateKey(ACCOUNT_ZERO_PRIVATE_KEY, "correct horse"),
-    ).rejects.toThrow("already an account");
-  });
-
-  it("records the kind and fingerprint for mnemonic wallets", async () => {
+  it("records the kind for mnemonic wallets", async () => {
     const { storage, getRegistry } = createStorage();
     const service = new WalletService({ storage });
     await service.importWallet(TEST_MNEMONIC, "correct horse");
 
     expect(getRegistry()?.wallets[0]).toMatchObject({ kind: "mnemonic" });
-    expect(getRegistry()?.wallets[0]?.addressFingerprint).toMatch(
-      /^[0-9a-f]{64}$/,
-    );
   });
 
   it("supports biometric unlock for an imported-key wallet", async () => {

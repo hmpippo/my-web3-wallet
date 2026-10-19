@@ -11,10 +11,6 @@ export function SiteHeader() {
         <span>my wallet</span>
       </Link>
       <div className="header-tools">
-        <nav aria-label="Main navigation" className="header-nav">
-          <Link href="/wallet">Wallet</Link>
-          <Link href="/send">Send</Link>
-        </nav>
         <ChainSwitcher />
       </div>
     </header>

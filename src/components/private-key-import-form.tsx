@@ -50,7 +50,9 @@ export function PrivateKeyImportForm() {
   }
 
   return (
-    <>
+    <section className="form-card" aria-labelledby="import-private-key-title">
+      <p className="eyebrow">Restore account</p>
+      <h1 id="import-private-key-title">Import a private key</h1>
       <section className="security-warning" role="note">
         <strong>Importing a private key is different.</strong> It creates a
         single-account wallet with no recovery phrase: you cannot add more
@@ -124,7 +126,7 @@ export function PrivateKeyImportForm() {
           {error}
         </p>
       )}
-    </>
+    </section>
   );
 }
 

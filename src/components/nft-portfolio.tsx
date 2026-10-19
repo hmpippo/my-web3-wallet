@@ -61,9 +61,10 @@ export function NftPortfolio({ chainId, nfts }: NftPortfolioProps) {
           items={[
             {
               label: "Refresh list",
+              icon: "refresh",
               onClick: () => void walletService.syncNftOwnership(chainId),
             },
-            { label: "Import NFT", href: "/nfts/import" },
+            { label: "Import NFT", icon: "import", href: "/nfts/import" },
           ]}
         />
       </div>

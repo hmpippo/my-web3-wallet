@@ -81,24 +81,6 @@ export async function decryptVault(
   }
 }
 
-/**
- * A non-reversible, lowercase-hex fingerprint of an address.
- *
- * The wallet deliberately keeps plain addresses out of stored metadata, but
- * still needs to know whether a key being imported is already present on the
- * device. A SHA-256 of the public address is enough for that check while
- * keeping the address itself off disk.
- */
-export async function fingerprintAddress(address: string): Promise<string> {
-  const digest = await crypto.subtle.digest(
-    "SHA-256",
-    new TextEncoder().encode(address.toLowerCase()),
-  );
-  return Array.from(new Uint8Array(digest), (byte) =>
-    byte.toString(16).padStart(2, "0"),
-  ).join("");
-}
-
 function validatePassword(password: string): void {
   if (password.length < MIN_PASSWORD_LENGTH) {
     throw new RangeError(

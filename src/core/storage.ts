@@ -101,12 +101,6 @@ export interface StoredWalletSummary {
    * import existed, which are always recovery-phrase wallets.
    */
   readonly kind?: "mnemonic" | "privateKey";
-  /**
-   * SHA-256 of the wallet's primary address (see `fingerprintAddress`). Used to
-   * refuse importing a key whose address is already on the device without
-   * storing the address itself.
-   */
-  readonly addressFingerprint?: string;
 }
 
 export interface WalletRegistry {
@@ -368,10 +362,7 @@ function parseStoredWallet(value: unknown): StoredWalletSummary {
     !Number.isFinite(candidate.createdAt) ||
     (candidate.kind !== undefined &&
       candidate.kind !== "mnemonic" &&
-      candidate.kind !== "privateKey") ||
-    (candidate.addressFingerprint !== undefined &&
-      (typeof candidate.addressFingerprint !== "string" ||
-        !/^[0-9a-f]{64}$/.test(candidate.addressFingerprint)))
+      candidate.kind !== "privateKey")
   ) {
     throw new Error("Stored wallet registry contains an invalid wallet");
   }
@@ -381,9 +372,6 @@ function parseStoredWallet(value: unknown): StoredWalletSummary {
     name: candidate.name.trim(),
     createdAt: candidate.createdAt,
     ...(candidate.kind === undefined ? {} : { kind: candidate.kind }),
-    ...(candidate.addressFingerprint === undefined
-      ? {}
-      : { addressFingerprint: candidate.addressFingerprint }),
   };
 }
 

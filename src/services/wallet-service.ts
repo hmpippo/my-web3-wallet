@@ -3,11 +3,7 @@ import type {
   Erc20TransferEstimate,
   NativeTransferEstimate,
 } from "./transaction-service";
-import {
-  decryptVault,
-  encryptVault,
-  fingerprintAddress,
-} from "@/core/crypto";
+import { decryptVault, encryptVault } from "@/core/crypto";
 import {
   deriveAccountAtIndex,
   generateMnemonic,
@@ -328,7 +324,6 @@ export class WalletService {
         name: pendingWallet.name,
         createdAt: Date.now(),
         kind: "mnemonic",
-        addressFingerprint: await fingerprintAddress(pendingWallet.address),
       });
       await this.storage.saveRegistry(registry);
       this.assertOperationCurrent(operationVersion);
@@ -389,7 +384,6 @@ export class WalletService {
         name: walletName,
         createdAt: Date.now(),
         kind: "mnemonic",
-        addressFingerprint: await fingerprintAddress(account.address),
       });
       await this.storage.saveRegistry(registry);
       this.assertOperationCurrent(operationVersion);
@@ -409,8 +403,7 @@ export class WalletService {
    * A raw key has no BIP-32 lineage, so the resulting wallet cannot derive
    * further accounts: `addAccount` refuses, and address recovery depends on the
    * key itself rather than on a recovery phrase. The key is validated and its
-   * address derived before anything is persisted, and an address already on the
-   * device is refused so the same key cannot be imported twice.
+   * address derived before anything is persisted.
    */
   async importPrivateKey(privateKey: string, password: string): Promise<Address> {
     this.assertNoWalletCreationInProgress();
@@ -419,10 +412,8 @@ export class WalletService {
     const registryVersion = this.operationVersion;
     await this.ensureRegistry();
     this.assertOperationCurrent(registryVersion);
-    await this.assertPrivateKeyAvailable(address);
     this.lock();
     const operationVersion = this.operationVersion;
-    const addressFingerprint = await fingerprintAddress(address);
 
     this.assertOperationCurrent(operationVersion);
     const vault = await encryptVault(
@@ -446,7 +437,6 @@ export class WalletService {
       name: walletName,
       createdAt: Date.now(),
       kind: "privateKey",
-      addressFingerprint,
     });
     await this.storage.saveRegistry(registry);
     this.assertOperationCurrent(operationVersion);
@@ -1477,33 +1467,6 @@ export class WalletService {
     let index = 1;
     while (used.has(`${prefix} ${index}`)) index += 1;
     return `${prefix} ${index}`;
-  }
-
-  /**
-   * Refuses a key whose address is already present, either in the currently
-   * unlocked session or in another wallet on this device (matched by the stored
-   * address fingerprint, since plain addresses are never persisted).
-   */
-  private async assertPrivateKeyAvailable(address: Address): Promise<void> {
-    if (
-      this.state.accounts.some(
-        (account) => account.address.toLowerCase() === address.toLowerCase(),
-      )
-    ) {
-      throw new Error(
-        "That private key is already an account in the unlocked wallet",
-      );
-    }
-    const fingerprint = await fingerprintAddress(address);
-    if (
-      this.registry.wallets.some(
-        (wallet) => wallet.addressFingerprint === fingerprint,
-      )
-    ) {
-      throw new Error(
-        "That private key has already been imported on this device",
-      );
-    }
   }
 
   private async assertNftOwned(

@@ -67,21 +67,23 @@ new accounts always use the next unused derivation index.
 
 ## Importing a private key
 
-Besides a recovery phrase, `/import` can restore a single private key. A raw key
-has no BIP-32 lineage, so it becomes its own wallet with exactly one account
-(addressed by the sentinel path `imported`): it cannot derive further accounts,
-and the wallet manager labels it "Private key". The key is normalized (an
-optional `0x` prefix is accepted), validated as a secp256k1 scalar, and its
-address derived before anything is written; the key is only ever persisted
-inside the same AES-GCM vault as a recovery phrase, stored as a tagged secret
-(`core/vault-secret.ts`) so existing bare-phrase vaults keep working unchanged.
-Because a lone key has no recovery phrase, losing it means losing the funds, so
-the import form warns the user before continuing. To stop the same key being
-imported twice, each wallet entry stores a SHA-256 fingerprint of its primary
-address (never the address itself) and imports of a key whose address is already
-present on the device are refused. Private-key wallets support the same lock,
-reveal, send, token, and NFT flows as mnemonic wallets, including biometric
-unlock, which wraps the key exactly as it wraps a recovery phrase.
+Besides a recovery phrase, `/import/private-key` can restore a single private
+key. A raw key has no BIP-32 lineage, so it becomes its own wallet with exactly
+one account (addressed by the sentinel path `imported`): it cannot derive
+further accounts, and the home screen lists it under a separate **Imported
+accounts** section rather than among the recovery-phrase wallets. The Unlock
+screen's wallet picker groups the two kinds the same way, and the two import
+pages are single-purpose: `/import` restores a recovery phrase, while
+`/import/private-key` restores a key (no method switch between them). The key is
+normalized (an optional `0x` prefix is accepted), validated as a secp256k1
+scalar, and its address derived before anything is written; the key is only ever
+persisted inside the same AES-GCM vault as a recovery phrase, stored as a tagged
+secret (`core/vault-secret.ts`) so existing bare-phrase vaults keep working
+unchanged. Because a lone key has no recovery phrase, losing it means losing the
+funds, so the import form warns the user before continuing. Private-key wallets
+support the same lock, reveal, send, token, and NFT flows as mnemonic wallets,
+including biometric unlock, which wraps the key exactly as it wraps a recovery
+phrase.
 
 The wallet overview includes a Tokens tab for manually added ERC-20 contracts
 on the active chain. Token name, symbol, decimals, and the selected account's
