@@ -24,7 +24,7 @@ Recommended order of work: **H1** (cheap, high value), then **H2 + M1**, then **
 | # | Severity | Finding |
 |---|----------|---------|
 | H1 | **High** | No CSP / clickjacking / security headers at all — **fixed in phase 1** |
-| H2 | **High** | Secrets live in `localStorage` (spec said IndexedDB), no at-rest protection |
+| H2 | **High** | Secrets lived in `localStorage` (spec said IndexedDB), no at-rest protection — **fixed** |
 | M1 | Medium | No idle/session timeout; keys stay in memory until `pagehide` |
 | M2 | Medium | Offline brute-force: 8-char minimum, no strength rule, no throttle |
 | M3 | Medium | `/api/transactions` is an unauthenticated, unthrottled Etherscan proxy |
@@ -90,7 +90,9 @@ The implemented header set, applied to `/:path*`:
 
 ### H2 — Encrypted vault and biometric vault stored in `localStorage`
 
-**Evidence:** `src/core/storage.ts` uses `window.localStorage` for:
+**Status: fixed.** Wallet records now live in **IndexedDB** (`src/core/storage-backend.ts`), behind the unchanged `StorageService` interface. Existing `localStorage` installs are imported once on first load and the legacy copies are removed (`src/core/storage.ts`). Theme and active-chain preferences stay in `localStorage`; they contain no key material.
+
+**Evidence (pre-fix):** `src/core/storage.ts` used `window.localStorage` for:
 
 - `wallet_vault_v1:<walletId>` — the AES-GCM encrypted recovery phrase / private key
 - `wallet_account_metadata_v1:<walletId>`
@@ -99,13 +101,27 @@ The implemented header set, applied to `/:path*`:
 
 `AGENTS.md` §4.3 explicitly recommends **indexedDB**.
 
-**Impact:**
+**Impact (pre-fix):**
 
-- Any same-origin script reads **all** vaults synchronously and in bulk — no iteration, no async, no size limits in the way (see H1).
+- Any same-origin script read **all** vaults synchronously and in bulk — no iteration, no async, no size limits in the way (see H1).
 - `localStorage` is **not** partitioned in the way cookies are; it is shared by everything served from the same origin. If this app ever shares a host/domain/subpath with other pages, those pages can read the vaults.
 - The blob is plaintext-at-rest within the browser profile: it is included in profile backups/sync and readable from a forensic image, with no OS keychain involvement.
 
-**Remediation:** move the vault, account metadata, and biometric vault to **IndexedDB** (the interfaces in `src/core/storage.ts` make this a contained change behind `StorageService`). IndexedDB is not a substitute for H1, but it removes the "one synchronous call dumps every secret" path and the bulk-profile-exfil path. Track this explicitly against the `AGENTS.md` §4.3 deviation.
+**Remediation (implemented):**
+
+- `StorageService` sits on a small async key-value backend; `createIndexedDbBackend()` stores JSON strings in database `my-wallet`, object store `records`.
+- The one-time migration enumerates `wallet_registry_v1`, `wallet_vault_v1*`, `wallet_accounts_v1*`, and `wallet_biometric_v1*`, commits them to IndexedDB in a single transaction, writes a migration marker, and only then deletes the `localStorage` copies. A failed write leaves `localStorage` intact and retries on the next call.
+- `clearVault` deletes the vault, metadata, and biometric record in one transaction.
+- The legacy single-wallet adoption path now runs against IndexedDB and writes the registry before dropping the bare keys, so a crash cannot strand a re-keyed vault.
+- A best-effort `navigator.storage.persist()` request is made after the first successful write.
+
+**Residual risk (not removed by this fix):**
+
+- IndexedDB is still same-origin: script that can run on the page can read and exfiltrate the vaults. Only the H1 phase-2 nonce CSP plus a short unlock/sign window materially reduces that.
+- IndexedDB is plaintext-at-rest inside the browser profile exactly like `localStorage`; it is included in profile backups/sync and in forensic images.
+- IndexedDB is evictable (Safari's 7-day cap, storage pressure). The recovery phrase remains the only real backup; persistence reduces but does not remove the risk.
+
+What the move does buy: no synchronous single-call dump of every vault, wallets out of the `localStorage` namespace shared by every same-origin page, and alignment with `AGENTS.md` §4.3.
 
 ---
 
@@ -201,7 +217,7 @@ JavaScript strings cannot be zeroized. `lock()` drops the references, but heap c
 |---|---|
 | `console.*` / `eval` / `innerHTML` in `src/` | None (one static `dangerouslySetInnerHTML` in `theme-script.tsx`, safe today) |
 | `.env` tracked by git | No — ignored at `.gitignore:34`, never in history |
-| Secrets in `localStorage` | Confirmed (H2) |
+| Secrets in `localStorage` | Fixed — IndexedDB with one-time import of existing installs (H2) |
 | Idle / auto-lock | Absent (M1) |
 | Security headers | Present in production — verified by `curl -I` and a production browser pass (H1, phase 1) |
 | `pnpm audit` | Failed — registry lacks the advisories endpoint (I1) |

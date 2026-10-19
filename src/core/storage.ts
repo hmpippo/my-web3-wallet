@@ -6,6 +6,7 @@ import {
 import { accountDerivationPath } from "./hd-wallet";
 import { isSafeImageUri, MAX_IMAGE_URL_LENGTH } from "./url-safety";
 import { DEFAULT_CHAIN_ID, isSupportedChainId } from "./chain";
+import { createIndexedDbBackend, type StorageBackend } from "./storage-backend";
 import { getAddress } from "viem";
 
 /**
@@ -128,138 +129,284 @@ export interface StorageService {
   clearAccountMetadata(walletId: string): Promise<void>;
 }
 
-export const storageService: StorageService = {
-  async saveRegistry(registry) {
-    const storage = getLocalStorage();
-    const validated = parseRegistry(registry);
-    storage.setItem(WALLET_REGISTRY_STORAGE_KEY, JSON.stringify(validated));
-  },
+export interface LegacyLocalStorage {
+  readonly length: number;
+  key(index: number): string | null;
+  getItem(key: string): string | null;
+  removeItem(key: string): void;
+}
 
-  async loadRegistry() {
-    const storage = getLocalStorage();
-    const serialized = storage.getItem(WALLET_REGISTRY_STORAGE_KEY);
-    if (serialized === null) {
-      // No registry yet: adopt a pre-multi-wallet install, if one exists.
-      return adoptLegacyWallet(storage);
-    }
+export interface StorageServiceOptions {
+  /**
+   * Synchronous storage imported once and then cleared. Defaults to
+   * `window.localStorage`. `null` disables the import (server render, tests).
+   */
+  readonly legacyStorage?: LegacyLocalStorage | null;
+}
 
-    let parsed: unknown;
+/**
+ * Marker recording that the `localStorage` → IndexedDB move already ran. It
+ * lives in IndexedDB, so a half-finished migration retries on the next load.
+ */
+const STORAGE_MIGRATION_MARKER_KEY = "wallet_storage_migrated_v1";
+
+const LEGACY_WALLET_KEY_PREFIXES = [
+  VAULT_STORAGE_KEY,
+  ACCOUNT_METADATA_STORAGE_KEY,
+  BIOMETRIC_VAULT_STORAGE_KEY,
+] as const;
+
+export function createStorageService(
+  backend: StorageBackend,
+  options: StorageServiceOptions = {},
+): StorageService {
+  let migration: Promise<void> | null = null;
+  let persistenceRequested = false;
+
+  /**
+   * Asks the browser not to evict the database under storage pressure. Best
+   * effort: unsupported browsers (and denied requests) simply ignore it. Runs
+   * once, after the first successful write.
+   */
+  function requestPersistentStorage(): void {
+    if (persistenceRequested || typeof navigator === "undefined") return;
+    persistenceRequested = true;
     try {
-      parsed = JSON.parse(serialized);
+      void navigator.storage?.persist?.().catch(() => undefined);
     } catch {
-      throw new Error("Stored wallet registry is not valid JSON");
+      // Blocked or unsupported: not fatal.
     }
-    return parseRegistry(parsed);
-  },
-
-  async clearRegistry() {
-    const storage = getLocalStorage();
-    storage.removeItem(WALLET_REGISTRY_STORAGE_KEY);
-  },
-
-  async saveVault(walletId, vault) {
-    const storage = getLocalStorage();
-    const validatedVault = parseStoredVault(vault);
-    storage.setItem(
-      walletVaultKey(assertWalletId(walletId)),
-      JSON.stringify(validatedVault),
-    );
-  },
-
-  async loadVault(walletId) {
-    const storage = getLocalStorage();
-    const serializedVault = storage.getItem(
-      walletVaultKey(assertWalletId(walletId)),
-    );
-    if (serializedVault === null) return null;
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(serializedVault);
-    } catch {
-      throw new Error("Stored vault is not valid JSON");
-    }
-    return parseStoredVault(parsed);
-  },
-
-  async clearVault(walletId) {
-    const storage = getLocalStorage();
-    const id = assertWalletId(walletId);
-    storage.removeItem(walletVaultKey(id));
-    storage.removeItem(walletAccountMetadataKey(id));
-    storage.removeItem(walletBiometricVaultKey(id));
-  },
-
-  async hasVault(walletId) {
-    return (await storageService.loadVault(walletId)) !== null;
-  },
-
-  async saveBiometricVault(walletId, vault) {
-    const storage = getLocalStorage();
-    const validatedVault = validateBiometricVault(vault);
-    storage.setItem(
-      walletBiometricVaultKey(assertWalletId(walletId)),
-      JSON.stringify(validatedVault),
-    );
-  },
-
-  async loadBiometricVault(walletId) {
-    const storage = getLocalStorage();
-    const serializedVault = storage.getItem(
-      walletBiometricVaultKey(assertWalletId(walletId)),
-    );
-    if (serializedVault === null) return null;
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(serializedVault);
-    } catch {
-      throw new Error("Stored biometric vault is not valid JSON");
-    }
-    return validateBiometricVault(parsed);
-  },
-
-  async clearBiometricVault(walletId) {
-    const storage = getLocalStorage();
-    storage.removeItem(walletBiometricVaultKey(assertWalletId(walletId)));
-  },
-
-  async saveAccountMetadata(walletId, metadata) {
-    const storage = getLocalStorage();
-    const validatedMetadata = parseAccountMetadata(metadata);
-    storage.setItem(
-      walletAccountMetadataKey(assertWalletId(walletId)),
-      JSON.stringify(validatedMetadata),
-    );
-  },
-
-  async loadAccountMetadata(walletId) {
-    const storage = getLocalStorage();
-    const serializedMetadata = storage.getItem(
-      walletAccountMetadataKey(assertWalletId(walletId)),
-    );
-    if (serializedMetadata === null) return null;
-
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(serializedMetadata);
-    } catch {
-      throw new Error("Stored account metadata is not valid JSON");
-    }
-    return parseAccountMetadata(parsed);
-  },
-
-  async clearAccountMetadata(walletId) {
-    const storage = getLocalStorage();
-    storage.removeItem(walletAccountMetadataKey(assertWalletId(walletId)));
-  },
-};
-
-function getLocalStorage(): Storage {
-  if (typeof window === "undefined") {
-    throw new Error("Wallet storage is only available in a browser");
   }
-  return window.localStorage;
+
+  function ensureMigrated(): Promise<void> {
+    if (migration !== null) return migration;
+
+    const legacy = resolveLegacyStorage(options);
+    // Nothing to import: do not cache, so a browser that briefly hides
+    // `localStorage` can still migrate on a later call.
+    if (legacy === null) return Promise.resolve();
+
+    const pending = migrateLegacyLocalStorage(backend, legacy);
+    migration = pending;
+    // A failed import must not poison the service: the next call retries.
+    pending.catch(() => {
+      if (migration === pending) migration = null;
+    });
+    return pending;
+  }
+
+  const service: StorageService = {
+    async saveRegistry(registry) {
+      await ensureMigrated();
+      const validated = parseRegistry(registry);
+      await backend.set(
+        WALLET_REGISTRY_STORAGE_KEY,
+        JSON.stringify(validated),
+      );
+      requestPersistentStorage();
+    },
+
+    async loadRegistry() {
+      await ensureMigrated();
+      const serialized = await backend.get(WALLET_REGISTRY_STORAGE_KEY);
+      if (serialized === null) {
+        // No registry yet: adopt a pre-multi-wallet install, if one exists.
+        return adoptLegacyWallet(backend);
+      }
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(serialized);
+      } catch {
+        throw new Error("Stored wallet registry is not valid JSON");
+      }
+      return parseRegistry(parsed);
+    },
+
+    async clearRegistry() {
+      await ensureMigrated();
+      await backend.delete(WALLET_REGISTRY_STORAGE_KEY);
+    },
+
+    async saveVault(walletId, vault) {
+      await ensureMigrated();
+      const validatedVault = parseStoredVault(vault);
+      await backend.set(
+        walletVaultKey(assertWalletId(walletId)),
+        JSON.stringify(validatedVault),
+      );
+      requestPersistentStorage();
+    },
+
+    async loadVault(walletId) {
+      await ensureMigrated();
+      const serializedVault = await backend.get(
+        walletVaultKey(assertWalletId(walletId)),
+      );
+      if (serializedVault === null) return null;
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(serializedVault);
+      } catch {
+        throw new Error("Stored vault is not valid JSON");
+      }
+      return parseStoredVault(parsed);
+    },
+
+    async clearVault(walletId) {
+      await ensureMigrated();
+      const id = assertWalletId(walletId);
+      await backend.deleteMany([
+        walletVaultKey(id),
+        walletAccountMetadataKey(id),
+        walletBiometricVaultKey(id),
+      ]);
+    },
+
+    async hasVault(walletId) {
+      return (await service.loadVault(walletId)) !== null;
+    },
+
+    async saveBiometricVault(walletId, vault) {
+      await ensureMigrated();
+      const validatedVault = validateBiometricVault(vault);
+      await backend.set(
+        walletBiometricVaultKey(assertWalletId(walletId)),
+        JSON.stringify(validatedVault),
+      );
+    },
+
+    async loadBiometricVault(walletId) {
+      await ensureMigrated();
+      const serializedVault = await backend.get(
+        walletBiometricVaultKey(assertWalletId(walletId)),
+      );
+      if (serializedVault === null) return null;
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(serializedVault);
+      } catch {
+        throw new Error("Stored biometric vault is not valid JSON");
+      }
+      return validateBiometricVault(parsed);
+    },
+
+    async clearBiometricVault(walletId) {
+      await ensureMigrated();
+      await backend.delete(walletBiometricVaultKey(assertWalletId(walletId)));
+    },
+
+    async saveAccountMetadata(walletId, metadata) {
+      await ensureMigrated();
+      const validatedMetadata = parseAccountMetadata(metadata);
+      await backend.set(
+        walletAccountMetadataKey(assertWalletId(walletId)),
+        JSON.stringify(validatedMetadata),
+      );
+    },
+
+    async loadAccountMetadata(walletId) {
+      await ensureMigrated();
+      const serializedMetadata = await backend.get(
+        walletAccountMetadataKey(assertWalletId(walletId)),
+      );
+      if (serializedMetadata === null) return null;
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(serializedMetadata);
+      } catch {
+        throw new Error("Stored account metadata is not valid JSON");
+      }
+      return parseAccountMetadata(parsed);
+    },
+
+    async clearAccountMetadata(walletId) {
+      await ensureMigrated();
+      await backend.delete(
+        walletAccountMetadataKey(assertWalletId(walletId)),
+      );
+    },
+  };
+
+  return service;
+}
+
+export const storageService: StorageService = createStorageService(
+  createIndexedDbBackend(),
+);
+
+function resolveLegacyStorage(
+  options: StorageServiceOptions,
+): LegacyLocalStorage | null {
+  if (options.legacyStorage !== undefined) return options.legacyStorage;
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage;
+  } catch {
+    // Blocked storage (private mode, policy) is not an error: there is simply
+    // nothing to import.
+    return null;
+  }
+}
+
+/**
+ * Copies every wallet record out of `localStorage` and into the backend.
+ *
+ * Ordering matters: the IndexedDB transaction commits before any legacy key is
+ * removed, so a crash can leave duplicates but never a lost wallet. The marker
+ * is written before the cleanup, so a later run can never copy stale values
+ * over newer IndexedDB data.
+ */
+async function migrateLegacyLocalStorage(
+  backend: StorageBackend,
+  legacy: LegacyLocalStorage,
+): Promise<void> {
+  if ((await backend.get(STORAGE_MIGRATION_MARKER_KEY)) !== null) return;
+
+  const records = collectLegacyRecords(legacy);
+  // Nothing to import: leave the marker unwritten so a profile restored or
+  // synced later can still be migrated on a future load. (Writing the marker
+  // here would permanently disable the import for an install that happened to
+  // start with an empty localStorage.)
+  if (records.length === 0) return;
+
+  await backend.setMany(records);
+  await backend.set(STORAGE_MIGRATION_MARKER_KEY, "1");
+
+  for (const [key] of records) {
+    try {
+      legacy.removeItem(key);
+    } catch {
+      // The marker guarantees these keys are never imported again.
+    }
+  }
+}
+
+function collectLegacyRecords(
+  legacy: LegacyLocalStorage,
+): Array<readonly [string, string]> {
+  const keys = new Set<string>([WALLET_REGISTRY_STORAGE_KEY]);
+  for (let index = 0; index < legacy.length; index += 1) {
+    const key = legacy.key(index);
+    if (key === null) continue;
+    if (isWalletStorageKey(key)) keys.add(key);
+  }
+
+  const records: Array<readonly [string, string]> = [];
+  for (const key of keys) {
+    const value = legacy.getItem(key);
+    if (value !== null) records.push([key, value]);
+  }
+  return records;
+}
+
+function isWalletStorageKey(key: string): boolean {
+  return LEGACY_WALLET_KEY_PREFIXES.some(
+    (prefix) => key === prefix || key.startsWith(`${prefix}:`),
+  );
 }
 
 function assertWalletId(walletId: string): string {
@@ -274,34 +421,48 @@ function assertWalletId(walletId: string): string {
  * entry. Returns `null` when no legacy wallet exists, so a fresh install simply
  * starts with an empty registry.
  */
-function adoptLegacyWallet(storage: Storage): WalletRegistry | null {
-  const legacyVault = storage.getItem(VAULT_STORAGE_KEY);
+async function adoptLegacyWallet(
+  backend: StorageBackend,
+): Promise<WalletRegistry | null> {
+  const legacyVault = await backend.get(VAULT_STORAGE_KEY);
   if (legacyVault === null) return null;
 
   const walletId = createWalletId();
-  // Re-key the vault first: without it the wallet is unusable, so it must be
-  // safely in place before the legacy key is dropped.
-  storage.setItem(walletVaultKey(walletId), legacyVault);
-  const legacyAccounts = storage.getItem(ACCOUNT_METADATA_STORAGE_KEY);
+  // Re-key the records first: without the vault the wallet is unusable, so it
+  // must be safely in place before the legacy keys are dropped.
+  const rekeyed: Array<readonly [string, string]> = [
+    [walletVaultKey(walletId), legacyVault],
+  ];
+  const legacyAccounts = await backend.get(ACCOUNT_METADATA_STORAGE_KEY);
   if (legacyAccounts !== null) {
-    storage.setItem(walletAccountMetadataKey(walletId), legacyAccounts);
+    rekeyed.push([walletAccountMetadataKey(walletId), legacyAccounts]);
   }
-  const legacyBiometric = storage.getItem(BIOMETRIC_VAULT_STORAGE_KEY);
+  const legacyBiometric = await backend.get(BIOMETRIC_VAULT_STORAGE_KEY);
   if (legacyBiometric !== null) {
-    storage.setItem(walletBiometricVaultKey(walletId), legacyBiometric);
+    rekeyed.push([walletBiometricVaultKey(walletId), legacyBiometric]);
   }
-  storage.removeItem(VAULT_STORAGE_KEY);
-  storage.removeItem(ACCOUNT_METADATA_STORAGE_KEY);
-  storage.removeItem(BIOMETRIC_VAULT_STORAGE_KEY);
+  await backend.setMany(rekeyed);
 
   const registry: WalletRegistry = {
     version: 1,
     wallets: [
-      { id: walletId, name: "Wallet 1", createdAt: Date.now(), kind: "mnemonic" },
+      {
+        id: walletId,
+        name: "Wallet 1",
+        createdAt: Date.now(),
+        kind: "mnemonic",
+      },
     ],
     selectedId: walletId,
   };
-  storage.setItem(WALLET_REGISTRY_STORAGE_KEY, JSON.stringify(registry));
+  // Persist the registry before deleting the bare keys: a crash in between
+  // leaves an unreferenced copy, never an unreachable wallet.
+  await backend.set(WALLET_REGISTRY_STORAGE_KEY, JSON.stringify(registry));
+  await backend.deleteMany([
+    VAULT_STORAGE_KEY,
+    ACCOUNT_METADATA_STORAGE_KEY,
+    BIOMETRIC_VAULT_STORAGE_KEY,
+  ]);
   return registry;
 }
 
