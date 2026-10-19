@@ -6,6 +6,7 @@ import type {
 import {
   decryptVault,
   encryptVault,
+  fingerprintAddress,
 } from "@/core/crypto";
 import {
   deriveAccountAtIndex,
@@ -15,8 +16,11 @@ import {
   accountDerivationPath,
   MAX_ADDRESS_INDEX,
 } from "@/core/hd-wallet";
+import { addressFromPrivateKey, normalizePrivateKey } from "@/core/private-key";
+import { encodeVaultSecret, parseVaultSecret } from "@/core/vault-secret";
 import {
   createWalletId,
+  IMPORTED_ACCOUNT_PATH,
   storageService,
   type NftStandard,
   type StoredWalletNft,
@@ -293,7 +297,10 @@ export class WalletService {
     const operationVersion = this.operationVersion;
 
     try {
-      const vault = await encryptVault(pendingWallet.mnemonic, password);
+      const vault = await encryptVault(
+        encodeVaultSecret({ kind: "mnemonic", secret: pendingWallet.mnemonic }),
+        password,
+      );
       this.assertOperationCurrent(operationVersion);
       await this.storage.saveVault(pendingWallet.id, vault);
       try {
@@ -320,6 +327,8 @@ export class WalletService {
         id: pendingWallet.id,
         name: pendingWallet.name,
         createdAt: Date.now(),
+        kind: "mnemonic",
+        addressFingerprint: await fingerprintAddress(pendingWallet.address),
       });
       await this.storage.saveRegistry(registry);
       this.assertOperationCurrent(operationVersion);
@@ -352,7 +361,10 @@ export class WalletService {
     let seedTransferred = false;
     try {
       this.assertOperationCurrent(operationVersion);
-      const vault = await encryptVault(normalizedMnemonic, password);
+      const vault = await encryptVault(
+        encodeVaultSecret({ kind: "mnemonic", secret: normalizedMnemonic }),
+        password,
+      );
       this.assertOperationCurrent(operationVersion);
       const walletId = createWalletId();
       const walletName = this.nextWalletName();
@@ -376,6 +388,8 @@ export class WalletService {
         id: walletId,
         name: walletName,
         createdAt: Date.now(),
+        kind: "mnemonic",
+        addressFingerprint: await fingerprintAddress(account.address),
       });
       await this.storage.saveRegistry(registry);
       this.assertOperationCurrent(operationVersion);
@@ -387,6 +401,58 @@ export class WalletService {
     } finally {
       if (!seedTransferred) seed.fill(0);
     }
+  }
+
+  /**
+   * Imports a single private key as its own wallet with one account.
+   *
+   * A raw key has no BIP-32 lineage, so the resulting wallet cannot derive
+   * further accounts: `addAccount` refuses, and address recovery depends on the
+   * key itself rather than on a recovery phrase. The key is validated and its
+   * address derived before anything is persisted, and an address already on the
+   * device is refused so the same key cannot be imported twice.
+   */
+  async importPrivateKey(privateKey: string, password: string): Promise<Address> {
+    this.assertNoWalletCreationInProgress();
+    const normalizedKey = normalizePrivateKey(privateKey);
+    const address = addressFromPrivateKey(normalizedKey);
+    const registryVersion = this.operationVersion;
+    await this.ensureRegistry();
+    this.assertOperationCurrent(registryVersion);
+    await this.assertPrivateKeyAvailable(address);
+    this.lock();
+    const operationVersion = this.operationVersion;
+    const addressFingerprint = await fingerprintAddress(address);
+
+    this.assertOperationCurrent(operationVersion);
+    const vault = await encryptVault(
+      encodeVaultSecret({ kind: "privateKey", secret: normalizedKey }),
+      password,
+    );
+    this.assertOperationCurrent(operationVersion);
+    const walletId = createWalletId();
+    const walletName = this.nextWalletName("Imported key");
+    await this.storage.saveVault(walletId, vault);
+    try {
+      this.assertOperationCurrent(operationVersion);
+      await this.storage.saveAccountMetadata(walletId, createImportedMetadata());
+      this.assertOperationCurrent(operationVersion);
+    } catch (error) {
+      await this.storage.clearVault(walletId);
+      throw error;
+    }
+    const registry = addWalletToRegistry(this.registry, {
+      id: walletId,
+      name: walletName,
+      createdAt: Date.now(),
+      kind: "privateKey",
+      addressFingerprint,
+    });
+    await this.storage.saveRegistry(registry);
+    this.assertOperationCurrent(operationVersion);
+    this.registry = registry;
+    this.activateImportedWallet(createImportedAccount(address), normalizedKey);
+    return address;
   }
 
   async unlock(password: string): Promise<void> {
@@ -405,9 +471,46 @@ export class WalletService {
       throw new Error("No wallet is stored on this device");
     }
 
-    const mnemonic = await decryptVault(vault, password);
+    const payload = await decryptVault(vault, password);
     this.assertOperationCurrent(operationVersion);
-    await this.activateFromMnemonic(mnemonic, operationVersion, walletId);
+    const secret = parseVaultSecret(payload);
+    if (secret.kind === "privateKey") {
+      await this.activateFromPrivateKey(secret.secret, operationVersion, walletId);
+    } else {
+      await this.activateFromMnemonic(secret.secret, operationVersion, walletId);
+    }
+  }
+
+  /**
+   * Starts a session from a decrypted private key. Mirrors
+   * `activateFromMnemonic` for the single-account, non-HD wallet shape.
+   */
+  private async activateFromPrivateKey(
+    privateKey: string,
+    operationVersion: number,
+    walletId: string,
+  ): Promise<void> {
+    const normalizedKey = normalizePrivateKey(privateKey);
+    const address = addressFromPrivateKey(normalizedKey);
+    this.assertOperationCurrent(operationVersion);
+
+    const storedMetadata = await this.storage.loadAccountMetadata(walletId);
+    this.assertOperationCurrent(operationVersion);
+    const stored = storedMetadata?.accounts[0];
+    const account: WalletAccount = {
+      index: 0,
+      path: IMPORTED_ACCOUNT_PATH,
+      name: stored?.name ?? "Account 1",
+      address,
+      hidden: stored?.hidden ?? false,
+      tokens: stored?.tokens ?? [],
+      nfts: stored?.nfts ?? [],
+    };
+    if (!storedMetadata) {
+      await this.storage.saveAccountMetadata(walletId, createImportedMetadata());
+      this.assertOperationCurrent(operationVersion);
+    }
+    this.activateImportedWallet(account, normalizedKey);
   }
 
   /**
@@ -522,9 +625,10 @@ export class WalletService {
     if (!vault) {
       throw new Error("No wallet is stored on this device");
     }
-    // Re-verify the password so the recovery phrase can be wrapped and the
-    // enrollment cannot be triggered from a stale session.
-    const mnemonic = await decryptVault(vault, password);
+    // Re-verify the password so the vault secret can be wrapped and the
+    // enrollment cannot be triggered from a stale session. The secret is either
+    // a recovery phrase or a private key; the wrapper only sees a string.
+    const secretPayload = await decryptVault(vault, password);
     this.assertOperationCurrent(operationVersion);
 
     const prfSalt = createPrfSalt();
@@ -538,7 +642,7 @@ export class WalletService {
     let biometricVault: BiometricVault;
     try {
       biometricVault = await wrapMnemonic({
-        mnemonic,
+        mnemonic: secretPayload,
         prfOutput,
         credentialId,
         rpId,
@@ -596,16 +700,21 @@ export class WalletService {
     });
     this.assertOperationCurrent(operationVersion);
 
-    let mnemonic: string;
+    let secretPayload: string;
     try {
-      mnemonic = await unwrapMnemonic(vault, prfOutput);
+      secretPayload = await unwrapMnemonic(vault, prfOutput);
     } catch {
       throw new Error("Unable to decrypt the biometric vault");
     } finally {
       prfOutput.fill(0);
     }
     this.assertOperationCurrent(operationVersion);
-    await this.activateFromMnemonic(mnemonic, operationVersion, walletId);
+    const secret = parseVaultSecret(secretPayload);
+    if (secret.kind === "privateKey") {
+      await this.activateFromPrivateKey(secret.secret, operationVersion, walletId);
+    } else {
+      await this.activateFromMnemonic(secret.secret, operationVersion, walletId);
+    }
   }
 
   getAddress(): Address | null {
@@ -751,8 +860,17 @@ export class WalletService {
     if (!vault) {
       throw new Error("No wallet is stored on this device");
     }
-    const mnemonic = await decryptVault(vault, password);
-    const seed = await mnemonicToSeed(mnemonic);
+    const payload = await decryptVault(vault, password);
+    const secret = parseVaultSecret(payload);
+    if (secret.kind === "privateKey") {
+      const key = normalizePrivateKey(secret.secret);
+      if (addressFromPrivateKey(key) !== account.address) {
+        throw new Error("Stored key does not match the account");
+      }
+      return key;
+    }
+
+    const seed = await mnemonicToSeed(secret.secret);
     try {
       const derived = deriveAccountAtIndex(seed, index);
       if (derived.address !== account.address) {
@@ -765,7 +883,19 @@ export class WalletService {
   }
 
   async addAccount(): Promise<WalletAccount> {
-    if (!this.state.isUnlocked || !this.seed) {
+    if (!this.state.isUnlocked) {
+      throw new Error("Wallet is locked");
+    }
+    // An imported private key has no BIP-32 lineage, so it has exactly one
+    // account and cannot derive more.
+    if (
+      this.state.accounts.some(
+        (account) => account.path === IMPORTED_ACCOUNT_PATH,
+      )
+    ) {
+      throw new Error("Imported-key wallets cannot add accounts");
+    }
+    if (!this.seed) {
       throw new Error("Wallet is locked");
     }
     const mutationVersion = this.beginAccountMutation();
@@ -1338,12 +1468,42 @@ export class WalletService {
     );
   }
 
-  /** The next free `Wallet N` name, so defaults never collide after a delete. */
-  private nextWalletName(): string {
+  /**
+   * The next free `<prefix> N` name, so defaults never collide after a delete.
+   * HD wallets use "Wallet", imported-key wallets use "Imported key".
+   */
+  private nextWalletName(prefix = "Wallet"): string {
     const used = new Set(this.registry.wallets.map((wallet) => wallet.name));
     let index = 1;
-    while (used.has(`Wallet ${index}`)) index += 1;
-    return `Wallet ${index}`;
+    while (used.has(`${prefix} ${index}`)) index += 1;
+    return `${prefix} ${index}`;
+  }
+
+  /**
+   * Refuses a key whose address is already present, either in the currently
+   * unlocked session or in another wallet on this device (matched by the stored
+   * address fingerprint, since plain addresses are never persisted).
+   */
+  private async assertPrivateKeyAvailable(address: Address): Promise<void> {
+    if (
+      this.state.accounts.some(
+        (account) => account.address.toLowerCase() === address.toLowerCase(),
+      )
+    ) {
+      throw new Error(
+        "That private key is already an account in the unlocked wallet",
+      );
+    }
+    const fingerprint = await fingerprintAddress(address);
+    if (
+      this.registry.wallets.some(
+        (wallet) => wallet.addressFingerprint === fingerprint,
+      )
+    ) {
+      throw new Error(
+        "That private key has already been imported on this device",
+      );
+    }
   }
 
   private async assertNftOwned(
@@ -1393,6 +1553,19 @@ export class WalletService {
     this.updateState(true, accounts, selectedIndex);
     // A wallet session just started: reconcile the stored NFT list against the
     // chain in the background (see syncNftOwnership).
+    void this.syncNftOwnership();
+  }
+
+  /**
+   * Starts a session for an imported-key wallet: no seed exists, and the single
+   * account's key is the only entry in the in-memory key map.
+   */
+  private activateImportedWallet(account: WalletAccount, privateKey: Hex): void {
+    this.seed?.fill(0);
+    this.seed = null;
+    this.privateKeys.clear();
+    this.privateKeys.set(account.index, privateKey);
+    this.updateState(true, [account], account.index);
     void this.syncNftOwnership();
   }
 
@@ -1556,6 +1729,36 @@ function createWalletAccount(index: number, address: Address): WalletAccount {
     hidden: false,
     tokens: [],
     nfts: [],
+  };
+}
+
+/** The single account of an imported-key wallet: index 0, no derivation path. */
+function createImportedAccount(address: Address): WalletAccount {
+  return {
+    index: 0,
+    path: IMPORTED_ACCOUNT_PATH,
+    name: "Account 1",
+    address,
+    hidden: false,
+    tokens: [],
+    nfts: [],
+  };
+}
+
+/** Public metadata for a freshly imported-key wallet. */
+function createImportedMetadata(): WalletAccountMetadata {
+  return {
+    version: 1,
+    accounts: [
+      {
+        path: IMPORTED_ACCOUNT_PATH,
+        name: "Account 1",
+        hidden: false,
+        tokens: [],
+        nfts: [],
+      },
+    ],
+    selectedPath: IMPORTED_ACCOUNT_PATH,
   };
 }
 

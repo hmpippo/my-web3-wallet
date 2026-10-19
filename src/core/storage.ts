@@ -49,6 +49,13 @@ export function createWalletId(): string {
   );
 }
 
+/**
+ * The pseudo derivation path stored for an account that came from an imported
+ * private key. Such a wallet has no BIP-32 lineage, so it holds exactly one
+ * account and is addressed by this sentinel instead of `m/44'/60'/...`.
+ */
+export const IMPORTED_ACCOUNT_PATH = "imported";
+
 export interface StoredWalletAccount {
   readonly path: string;
   readonly name: string;
@@ -89,6 +96,17 @@ export interface StoredWalletSummary {
   readonly id: string;
   readonly name: string;
   readonly createdAt: number;
+  /**
+   * How the wallet was set up. Absent on entries written before private-key
+   * import existed, which are always recovery-phrase wallets.
+   */
+  readonly kind?: "mnemonic" | "privateKey";
+  /**
+   * SHA-256 of the wallet's primary address (see `fingerprintAddress`). Used to
+   * refuse importing a key whose address is already on the device without
+   * storing the address itself.
+   */
+  readonly addressFingerprint?: string;
 }
 
 export interface WalletRegistry {
@@ -284,7 +302,9 @@ function adoptLegacyWallet(storage: Storage): WalletRegistry | null {
 
   const registry: WalletRegistry = {
     version: 1,
-    wallets: [{ id: walletId, name: "Wallet 1", createdAt: Date.now() }],
+    wallets: [
+      { id: walletId, name: "Wallet 1", createdAt: Date.now(), kind: "mnemonic" },
+    ],
     selectedId: walletId,
   };
   storage.setItem(WALLET_REGISTRY_STORAGE_KEY, JSON.stringify(registry));
@@ -345,7 +365,13 @@ function parseStoredWallet(value: unknown): StoredWalletSummary {
     candidate.name.trim().length === 0 ||
     candidate.name.trim().length > 32 ||
     typeof candidate.createdAt !== "number" ||
-    !Number.isFinite(candidate.createdAt)
+    !Number.isFinite(candidate.createdAt) ||
+    (candidate.kind !== undefined &&
+      candidate.kind !== "mnemonic" &&
+      candidate.kind !== "privateKey") ||
+    (candidate.addressFingerprint !== undefined &&
+      (typeof candidate.addressFingerprint !== "string" ||
+        !/^[0-9a-f]{64}$/.test(candidate.addressFingerprint)))
   ) {
     throw new Error("Stored wallet registry contains an invalid wallet");
   }
@@ -354,6 +380,10 @@ function parseStoredWallet(value: unknown): StoredWalletSummary {
     id: candidate.id,
     name: candidate.name.trim(),
     createdAt: candidate.createdAt,
+    ...(candidate.kind === undefined ? {} : { kind: candidate.kind }),
+    ...(candidate.addressFingerprint === undefined
+      ? {}
+      : { addressFingerprint: candidate.addressFingerprint }),
   };
 }
 
@@ -409,11 +439,16 @@ function parseAccountMetadata(value: unknown): WalletAccountMetadata {
 
   const accounts = candidate.accounts.map(parseStoredAccount);
   const paths = new Set(accounts.map((account) => account.path));
+  const hasImportedAccount = paths.has(IMPORTED_ACCOUNT_PATH);
+  // A wallet is either an HD wallet (and must contain the default account) or a
+  // single imported-key account. The two shapes never mix.
+  const isImportedWallet = accounts.length === 1 && hasImportedAccount;
+  const isHdWallet = !hasImportedAccount && paths.has(accountDerivationPath(0));
   if (
     accounts.length === 0 ||
-    !paths.has(accountDerivationPath(0)) ||
     paths.size !== accounts.length ||
-    accounts.every((account) => account.hidden)
+    accounts.every((account) => account.hidden) ||
+    !(isImportedWallet || isHdWallet)
   ) {
     throw new Error("Stored account metadata has invalid or duplicate accounts");
   }
@@ -436,8 +471,13 @@ function parseStoredAccount(value: unknown): StoredWalletAccount {
   }
 
   const candidate = value as Record<string, unknown>;
+  const isImported = candidate.path === IMPORTED_ACCOUNT_PATH;
   const index =
-    typeof candidate.path === "string" ? accountIndex(candidate.path) : null;
+    typeof candidate.path === "string" && !isImported
+      ? accountIndex(candidate.path)
+      : isImported
+        ? 0
+        : null;
   if (
     index === null ||
     typeof candidate.name !== "string" ||
@@ -449,7 +489,7 @@ function parseStoredAccount(value: unknown): StoredWalletAccount {
   }
 
   return {
-    path: accountDerivationPath(index),
+    path: isImported ? IMPORTED_ACCOUNT_PATH : accountDerivationPath(index),
     name: candidate.name.trim(),
     hidden: candidate.hidden,
     tokens:

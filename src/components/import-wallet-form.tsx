@@ -1,107 +1,59 @@
 "use client";
 
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
-import { walletService } from "@/services/wallet-service";
+import { useState } from "react";
+import { MnemonicImportForm } from "@/components/mnemonic-import-form";
+import { PrivateKeyImportForm } from "@/components/private-key-import-form";
 
+type ImportMethod = "mnemonic" | "privateKey";
+
+const IMPORT_TABS: { method: ImportMethod; label: string }[] = [
+  { method: "mnemonic", label: "Recovery phrase" },
+  { method: "privateKey", label: "Private key" },
+];
+
+/**
+ * Import entry point with a switch between the two supported secrets. The
+ * selected method's form is mounted alone, so switching tabs drops any typed
+ * secret from memory.
+ */
 export function ImportWalletForm() {
-  const router = useRouter();
-  const [mnemonic, setMnemonic] = useState("");
-  const [password, setPassword] = useState("");
-  const [passwordConfirmation, setPasswordConfirmation] = useState("");
-  const [isBusy, setIsBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  async function importWallet(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (password !== passwordConfirmation) {
-      setError("Passwords do not match.");
-      return;
-    }
-
-    setError(null);
-    setIsBusy(true);
-    try {
-      await walletService.importWallet(mnemonic, password);
-      setMnemonic("");
-      setPassword("");
-      setPasswordConfirmation("");
-      router.replace("/wallet");
-    } catch (caught) {
-      setError(getErrorMessage(caught));
-    } finally {
-      setIsBusy(false);
-    }
-  }
+  const [method, setMethod] = useState<ImportMethod>("mnemonic");
 
   return (
     <section className="form-card" aria-labelledby="import-title">
       <p className="eyebrow">Restore wallet</p>
-      <h1 id="import-title">Import with recovery phrase</h1>
-      <p className="muted-copy">
-        Your recovery phrase is processed on this device and saved only in
-        encrypted form.
-      </p>
-      <form className="wallet-form" onSubmit={importWallet}>
-        <label className="form-field">
-          Recovery phrase
-          <textarea
-            autoComplete="off"
-            onChange={(event) => setMnemonic(event.target.value)}
-            placeholder="Enter your 12 or 24 words"
-            required
-            rows={4}
-            spellCheck={false}
-            value={mnemonic}
-          />
-        </label>
-        <label className="form-field">
-          Password
-          <input
-            autoComplete="new-password"
-            minLength={8}
-            onChange={(event) => setPassword(event.target.value)}
-            required
-            type="password"
-            value={password}
-          />
-          <span className="field-help">Use at least 8 characters.</span>
-        </label>
-        <label className="form-field">
-          Confirm password
-          <input
-            autoComplete="new-password"
-            onChange={(event) => setPasswordConfirmation(event.target.value)}
-            required
-            type="password"
-            value={passwordConfirmation}
-          />
-        </label>
-        <div className="form-actions">
+      <h1 id="import-title">Import a wallet</h1>
+
+      <div className="history-tabs" role="tablist" aria-label="Import method">
+        {IMPORT_TABS.map((tab) => (
           <button
-            className="button button-primary"
-            disabled={isBusy}
-            type="submit"
+            aria-controls={`import-panel-${tab.method}`}
+            aria-selected={method === tab.method}
+            className="history-tab"
+            id={`import-tab-${tab.method}`}
+            key={tab.method}
+            onClick={() => setMethod(tab.method)}
+            role="tab"
+            tabIndex={method === tab.method ? 0 : -1}
+            type="button"
           >
-            {isBusy ? "Importing..." : "Import wallet"}
+            {tab.label}
           </button>
-          <Link className="text-link" href="/">
-            Back
-          </Link>
-        </div>
-      </form>
-      {error && (
-        <p className="form-error" role="alert">
-          {error}
-        </p>
-      )}
+        ))}
+      </div>
+
+      <div
+        aria-labelledby={`import-tab-${method}`}
+        className="history-tabpanel"
+        id={`import-panel-${method}`}
+        role="tabpanel"
+      >
+        {method === "mnemonic" ? (
+          <MnemonicImportForm />
+        ) : (
+          <PrivateKeyImportForm />
+        )}
+      </div>
     </section>
   );
-}
-
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error
-    ? error.message
-    : "Wallet import failed. Please try again.";
 }

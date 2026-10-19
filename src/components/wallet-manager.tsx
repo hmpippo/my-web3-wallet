@@ -102,8 +102,8 @@ export function WalletManager() {
           <p className="eyebrow">On this device</p>
           <h1 id="wallets-title">Your wallets</h1>
           <p className="muted-copy">
-            Each wallet has its own recovery phrase and password. Select one to
-            unlock its accounts.
+            Each wallet has its own secret and password. Select one to unlock
+            its accounts.
           </p>
 
           {error ? (
@@ -124,6 +124,11 @@ export function WalletManager() {
                     {wallet.id === walletState.selectedWalletId ? (
                       <span className="account-hidden-label">Selected</span>
                     ) : null}
+                    <span className="account-hidden-label">
+                      {wallet.kind === "privateKey"
+                        ? "Private key"
+                        : "Recovery phrase"}
+                    </span>
                   </div>
                 </div>
                 <OverflowMenu
@@ -193,7 +198,9 @@ export function WalletManager() {
                   >
                     <p className="field-help">
                       This permanently removes “{wallet.name}” from this device.
-                      Without its recovery phrase, the funds cannot be restored.
+                      {wallet.kind === "privateKey"
+                        ? " Without its private key, the funds cannot be restored."
+                        : " Without its recovery phrase, the funds cannot be restored."}
                     </p>
                     <label htmlFor={`wallet-delete-${wallet.id}`}>
                       Enter its password to delete
@@ -268,7 +275,10 @@ export function WalletManager() {
               <span className="option-number">02</span>
               <div>
                 <h3>Import a wallet</h3>
-                <p>Restore your wallet from a 12 or 24-word recovery phrase.</p>
+                <p>
+                  Restore from a 12 or 24-word recovery phrase, or import a
+                  single private key.
+                </p>
               </div>
               <Link className="button button-outline" href="/import">
                 Import wallet

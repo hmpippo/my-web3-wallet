@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useSyncExternalStore } from "react";
 import { CopyButton } from "@/components/copy-button";
+import { IMPORTED_ACCOUNT_PATH } from "@/core/storage";
 import { useActiveChain } from "@/lib/use-active-chain";
 import { walletService } from "@/services/wallet-service";
 
@@ -62,7 +63,11 @@ export function AccountDetail() {
             value={account.address}
           />
         </div>
-        <span className="account-derivation-path">{account.path}</span>
+        <span className="account-derivation-path">
+          {account.path === IMPORTED_ACCOUNT_PATH
+            ? "Imported private key"
+            : account.path}
+        </span>
       </section>
 
       <section

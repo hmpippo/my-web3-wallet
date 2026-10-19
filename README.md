@@ -23,6 +23,8 @@ Open [http://localhost:3000](http://localhost:3000) to view the app.
 - `src/app/` — entry, wallet preview, and send preview routes
 - `src/components/` — shared presentational UI
 - `src/core/hd-wallet.ts` — BIP-39 mnemonics and BIP-32 account derivation
+- `src/core/private-key.ts` — private-key normalization and address derivation for imports
+- `src/core/vault-secret.ts` — the tagged vault secret (recovery phrase or private key) and its legacy readback
 - `src/core/crypto.ts` — PBKDF2 (600,000 iterations) and AES-GCM vault encryption
 - `src/core/webauthn.ts` — WebAuthn passkey creation and PRF evaluation for biometric unlock
 - `src/core/biometric-vault.ts` — HKDF and AES-GCM wrapping of the recovery phrase under a passkey
@@ -62,6 +64,24 @@ private key is stored there. Locking clears derived keys from memory; after
 unlocking, the wallet restores the saved accounts and selected visible account.
 Accounts can be hidden and restored without deleting them or their funds, and
 new accounts always use the next unused derivation index.
+
+## Importing a private key
+
+Besides a recovery phrase, `/import` can restore a single private key. A raw key
+has no BIP-32 lineage, so it becomes its own wallet with exactly one account
+(addressed by the sentinel path `imported`): it cannot derive further accounts,
+and the wallet manager labels it "Private key". The key is normalized (an
+optional `0x` prefix is accepted), validated as a secp256k1 scalar, and its
+address derived before anything is written; the key is only ever persisted
+inside the same AES-GCM vault as a recovery phrase, stored as a tagged secret
+(`core/vault-secret.ts`) so existing bare-phrase vaults keep working unchanged.
+Because a lone key has no recovery phrase, losing it means losing the funds, so
+the import form warns the user before continuing. To stop the same key being
+imported twice, each wallet entry stores a SHA-256 fingerprint of its primary
+address (never the address itself) and imports of a key whose address is already
+present on the device are refused. Private-key wallets support the same lock,
+reveal, send, token, and NFT flows as mnemonic wallets, including biometric
+unlock, which wraps the key exactly as it wraps a recovery phrase.
 
 The wallet overview includes a Tokens tab for manually added ERC-20 contracts
 on the active chain. Token name, symbol, decimals, and the selected account's

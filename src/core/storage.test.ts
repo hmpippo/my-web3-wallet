@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ACCOUNT_METADATA_STORAGE_KEY,
   BIOMETRIC_VAULT_STORAGE_KEY,
+  IMPORTED_ACCOUNT_PATH,
   storageService,
   VAULT_STORAGE_KEY,
   WALLET_REGISTRY_STORAGE_KEY,
@@ -206,6 +207,51 @@ describe("vault storage", () => {
         })),
       }),
     );
+    await expect(
+      storageService.loadAccountMetadata(WALLET_ID),
+    ).rejects.toThrow("invalid or duplicate accounts");
+  });
+
+  it("stores an imported-key wallet as a single account without a derivation path", async () => {
+    const localStorage = createLocalStorageMock();
+    vi.stubGlobal("window", { localStorage });
+    const importedMetadata: WalletAccountMetadata = {
+      version: 1,
+      accounts: [
+        {
+          path: IMPORTED_ACCOUNT_PATH,
+          name: "Account 1",
+          hidden: false,
+          tokens: [],
+          nfts: [],
+        },
+      ],
+      selectedPath: IMPORTED_ACCOUNT_PATH,
+    };
+
+    await storageService.saveAccountMetadata(WALLET_ID, importedMetadata);
+
+    await expect(
+      storageService.loadAccountMetadata(WALLET_ID),
+    ).resolves.toEqual(importedMetadata);
+  });
+
+  it("rejects mixing an imported account with HD accounts", async () => {
+    const localStorage = createLocalStorageMock();
+    vi.stubGlobal("window", { localStorage });
+
+    localStorage.setItem(
+      walletAccountMetadataKey(WALLET_ID),
+      JSON.stringify({
+        version: 1,
+        accounts: [
+          { path: "m/44'/60'/0'/0/0", name: "Account 1", hidden: false },
+          { path: IMPORTED_ACCOUNT_PATH, name: "Imported", hidden: false },
+        ],
+        selectedPath: "m/44'/60'/0'/0/0",
+      }),
+    );
+
     await expect(
       storageService.loadAccountMetadata(WALLET_ID),
     ).rejects.toThrow("invalid or duplicate accounts");
@@ -454,6 +500,70 @@ describe("wallet registry storage", () => {
     vi.stubGlobal("window", { localStorage: createLocalStorageMock() });
 
     await expect(storageService.loadRegistry()).resolves.toBeNull();
+  });
+
+  it("round-trips a wallet's kind and address fingerprint", async () => {
+    vi.stubGlobal("window", { localStorage: createLocalStorageMock() });
+    const registry: WalletRegistry = {
+      version: 1,
+      wallets: [
+        {
+          id: WALLET_ID,
+          name: "Imported key 1",
+          createdAt: 1_700_000_000_000,
+          kind: "privateKey",
+          addressFingerprint: "a".repeat(64),
+        },
+      ],
+      selectedId: WALLET_ID,
+    };
+
+    await storageService.saveRegistry(registry);
+
+    await expect(storageService.loadRegistry()).resolves.toEqual(registry);
+  });
+
+  it("rejects an unknown kind or malformed fingerprint", async () => {
+    const localStorage = createLocalStorageMock();
+    vi.stubGlobal("window", { localStorage });
+
+    localStorage.setItem(
+      WALLET_REGISTRY_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        wallets: [
+          {
+            id: WALLET_ID,
+            name: "Wallet 1",
+            createdAt: 1,
+            kind: "seedless",
+          },
+        ],
+        selectedId: WALLET_ID,
+      }),
+    );
+    await expect(storageService.loadRegistry()).rejects.toThrow(
+      "invalid wallet",
+    );
+
+    localStorage.setItem(
+      WALLET_REGISTRY_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        wallets: [
+          {
+            id: WALLET_ID,
+            name: "Wallet 1",
+            createdAt: 1,
+            addressFingerprint: "not-a-hash",
+          },
+        ],
+        selectedId: WALLET_ID,
+      }),
+    );
+    await expect(storageService.loadRegistry()).rejects.toThrow(
+      "invalid wallet",
+    );
   });
 
   it("rejects a malformed or duplicate registry", async () => {

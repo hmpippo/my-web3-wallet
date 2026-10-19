@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState, useSyncExternalStore, type FormEvent } from "react";
 import { useActiveChain } from "@/lib/use-active-chain";
 import { walletService } from "@/services/wallet-service";
+import { IMPORTED_ACCOUNT_PATH } from "@/core/storage";
 import { CopyButton } from "@/components/copy-button";
 import { OverflowMenu } from "@/components/overflow-menu";
 
@@ -19,6 +20,9 @@ export function ManageAccounts() {
     () => walletService.getState(),
   );
   const accounts = walletState.accounts;
+  const isImportedWallet = accounts.some(
+    (account) => account.path === IMPORTED_ACCOUNT_PATH,
+  );
   const [error, setError] = useState<string | null>(null);
   const [isAdding, setIsAdding] = useState(false);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
@@ -92,7 +96,9 @@ export function ManageAccounts() {
       <section className="history-card" aria-labelledby="manage-accounts-heading">
         <div className="history-heading">
           <div>
-            <p className="eyebrow">HD accounts</p>
+            <p className="eyebrow">
+              {isImportedWallet ? "Imported key" : "HD accounts"}
+            </p>
             <h2 id="manage-accounts-heading">Accounts in this wallet</h2>
           </div>
         </div>
@@ -123,7 +129,11 @@ export function ManageAccounts() {
                     value={account.address}
                   />
                 </div>
-                <span className="account-derivation-path">{account.path}</span>
+                <span className="account-derivation-path">
+                  {account.path === IMPORTED_ACCOUNT_PATH
+                    ? "Imported private key"
+                    : account.path}
+                </span>
               </div>
               <OverflowMenu
                 label={`${account.name} options`}
@@ -188,17 +198,24 @@ export function ManageAccounts() {
         </section>
 
         <div className="card-footer-action">
-          <button
-            className="button button-primary"
-            disabled={isAdding}
-            onClick={() => void handleAddAccount()}
-            type="button"
-          >
-            <span aria-hidden="true" className="button-plus">
-              +
-            </span>
-            {isAdding ? "Adding..." : "Add account"}
-          </button>
+          {isImportedWallet ? (
+            <p className="field-help">
+              This wallet was created from a single private key, so it cannot
+              derive additional accounts.
+            </p>
+          ) : (
+            <button
+              className="button button-primary"
+              disabled={isAdding}
+              onClick={() => void handleAddAccount()}
+              type="button"
+            >
+              <span aria-hidden="true" className="button-plus">
+                +
+              </span>
+              {isAdding ? "Adding..." : "Add account"}
+            </button>
+          )}
         </div>
       </section>
     </main>

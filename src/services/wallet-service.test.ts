@@ -1449,3 +1449,159 @@ describe("WalletService biometric unlock", () => {
     });
   });
 });
+
+// The private key of a distinct account (Hardhat account 1) and of the mnemonic
+// wallet's account 0 (Hardhat account 0), used by the import tests below.
+const IMPORTED_PRIVATE_KEY =
+  "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d";
+const ACCOUNT_ZERO_PRIVATE_KEY =
+  "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
+
+describe("WalletService private key import", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("imports a private key as a single imported account", async () => {
+    const { storage, getVault, getAccountMetadata } = createStorage();
+    const service = new WalletService({ storage });
+
+    await expect(
+      service.importPrivateKey(IMPORTED_PRIVATE_KEY, "correct horse"),
+    ).resolves.toBe(SECOND_ADDRESS);
+    expect(service.getState()).toMatchObject({
+      isUnlocked: true,
+      address: SECOND_ADDRESS,
+      selectedAccountIndex: 0,
+      accounts: [
+        {
+          index: 0,
+          path: "imported",
+          name: "Account 1",
+          address: SECOND_ADDRESS,
+          hidden: false,
+          tokens: [],
+          nfts: [],
+        },
+      ],
+    });
+    expect(service.getState().wallets[0]).toMatchObject({
+      name: "Imported key 1",
+      kind: "privateKey",
+    });
+    expect(getAccountMetadata()?.accounts[0]?.path).toBe("imported");
+    // The key is only ever persisted encrypted.
+    expect(JSON.stringify(getVault())).not.toContain(IMPORTED_PRIVATE_KEY);
+  });
+
+  it("unlocks and reveals an imported key after verifying the password", async () => {
+    const service = new WalletService({ storage: createStorage().storage });
+    await service.importPrivateKey(IMPORTED_PRIVATE_KEY, "correct horse");
+    service.lock();
+    expect(service.getState()).toMatchObject(LOCKED_STATE);
+
+    await service.unlock("correct horse");
+    expect(service.getAddress()).toBe(SECOND_ADDRESS);
+    expect(service.getState().accounts[0]?.path).toBe("imported");
+
+    await expect(
+      service.revealPrivateKey(0, "wrong password"),
+    ).rejects.toThrow("Unable to decrypt vault");
+    await expect(service.revealPrivateKey(0, "correct horse")).resolves.toBe(
+      IMPORTED_PRIVATE_KEY,
+    );
+  });
+
+  it("signs and sends with the imported key", async () => {
+    const sendTransfer = vi.fn(async () => "0x1234" as `0x${string}`);
+    const service = new WalletService({
+      storage: createStorage().storage,
+      sendTransfer,
+    });
+    await service.importPrivateKey(IMPORTED_PRIVATE_KEY, "correct horse");
+
+    await service.signAndSendTransaction({
+      from: SECOND_ADDRESS as `0x${string}`,
+      to: "0x0000000000000000000000000000000000000001" as `0x${string}`,
+      value: BigInt(1),
+      chainId: SEPOLIA,
+    });
+
+    expect(sendTransfer).toHaveBeenCalledWith(
+      expect.objectContaining({ privateKey: IMPORTED_PRIVATE_KEY }),
+    );
+  });
+
+  it("refuses to add a derived account to an imported-key wallet", async () => {
+    const service = new WalletService({ storage: createStorage().storage });
+    await service.importPrivateKey(IMPORTED_PRIVATE_KEY, "correct horse");
+
+    await expect(service.addAccount()).rejects.toThrow(
+      "Imported-key wallets cannot add accounts",
+    );
+  });
+
+  it("accepts a key without the 0x prefix", async () => {
+    const service = new WalletService({ storage: createStorage().storage });
+
+    await expect(
+      service.importPrivateKey(IMPORTED_PRIVATE_KEY.slice(2), "correct horse"),
+    ).resolves.toBe(SECOND_ADDRESS);
+  });
+
+  it("rejects an invalid key without creating a wallet", async () => {
+    const { storage, getRegistry } = createStorage();
+    const service = new WalletService({ storage });
+
+    await expect(
+      service.importPrivateKey("0x1234", "correct horse"),
+    ).rejects.toThrow("64 hexadecimal characters");
+    expect(getRegistry()?.wallets ?? []).toHaveLength(0);
+    expect(service.getState()).toMatchObject(LOCKED_STATE);
+  });
+
+  it("blocks a key already imported on this device even while locked", async () => {
+    const { storage, getRegistry } = createStorage();
+    const service = new WalletService({ storage });
+    await service.importPrivateKey(IMPORTED_PRIVATE_KEY, "correct horse");
+    service.lock();
+
+    await expect(
+      service.importPrivateKey(IMPORTED_PRIVATE_KEY, "another password"),
+    ).rejects.toThrow("already been imported");
+    expect(getRegistry()?.wallets).toHaveLength(1);
+  });
+
+  it("blocks importing the key behind an existing unlocked account", async () => {
+    const service = new WalletService({ storage: createStorage().storage });
+    await service.importWallet(TEST_MNEMONIC, "correct horse");
+
+    await expect(
+      service.importPrivateKey(ACCOUNT_ZERO_PRIVATE_KEY, "correct horse"),
+    ).rejects.toThrow("already an account");
+  });
+
+  it("records the kind and fingerprint for mnemonic wallets", async () => {
+    const { storage, getRegistry } = createStorage();
+    const service = new WalletService({ storage });
+    await service.importWallet(TEST_MNEMONIC, "correct horse");
+
+    expect(getRegistry()?.wallets[0]).toMatchObject({ kind: "mnemonic" });
+    expect(getRegistry()?.wallets[0]?.addressFingerprint).toMatch(
+      /^[0-9a-f]{64}$/,
+    );
+  });
+
+  it("supports biometric unlock for an imported-key wallet", async () => {
+    const service = new WalletService({
+      storage: createStorage().storage,
+      biometric: createBiometricProvider(),
+    });
+    await service.importPrivateKey(IMPORTED_PRIVATE_KEY, "correct horse");
+    await service.enableBiometricUnlock("correct horse");
+
+    service.lock();
+    await service.unlockWithBiometric();
+
+    expect(service.getAddress()).toBe(SECOND_ADDRESS);
+    expect(service.getState().accounts[0]?.path).toBe("imported");
+  });
+});
