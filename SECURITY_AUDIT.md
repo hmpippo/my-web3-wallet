@@ -32,8 +32,8 @@ Remediation so far: **H1** (CSP and headers), **H2** (IndexedDB), **M1** (30-sec
 | M5 | Medium | Single trusted RPC for balances, nonce, gas, broadcast, delegation reads |
 | L1 | Low | `data:image/svg+xml` accepted as an NFT image |
 | L2 | Low | Legacy `gasPrice` pricing, no absolute fee cap |
-| L3 | Low | NFT metadata fetch follows redirects off the gateways; leaks user IP |
-| L4 | Low | Untrusted provider error text reflected into the UI |
+| L3 | Low | NFT metadata redirects and IP visibility — **mitigated**, residual documented |
+| L4 | Low | Untrusted provider error text reflected into the UI — **fixed** |
 | L5 | Low | Live `ETHERSCAN_API_KEY` on disk in `.env` |
 | I1 | Info | Dependency CVE scan not possible with the current registry |
 
@@ -85,7 +85,7 @@ The implemented header set, applied to `/:path*`:
 **Known residual gaps in phase 1:**
 
 - `'unsafe-inline'` in `script-src` means an HTML-injection XSS would still execute; only phase 2 closes this.
-- `connect-src https:` is broad because NFT metadata may be fetched from any public HTTPS host (`src/services/nft-service.ts`). It blocks `http:`, `ws:`, and non-HTTPS exfiltration, but **not** exfiltration to an arbitrary HTTPS endpoint. Tightening it requires the L3 gateway allow-list first.
+- `connect-src https:` is broad because NFT metadata may be fetched from any public HTTPS host (`src/services/nft-service.ts`). It blocks `http:`, `ws:`, and non-HTTPS exfiltration, but **not** exfiltration to an arbitrary HTTPS endpoint. Tightening it requires restricting metadata and image hosts to an allow-list; that product-scope reduction was considered for L3 and deliberately not taken, so `connect-src https:` stays broad.
 - `api.etherscan.io` is deliberately absent from `connect-src`: the history call is server-side (`src/services/etherscan-history.ts`) and must stay that way.
 
 ### H2 — Encrypted vault and biometric vault stored in `localStorage`
@@ -214,8 +214,13 @@ JavaScript strings cannot be zeroized. `lock()` drops the references, but heap c
 
 - **L1 — `data:image/svg+xml` accepted.** `isImageMediaType` in `src/core/url-safety.ts` is `startsWith("image/")`, so SVG is allowed. It renders via `<img>` in `src/components/nft-portfolio.tsx`, where SVG scripts do **not** execute, so this is **not XSS** — but it permits convincing fake-UI/phishing images and inflates `localStorage`. Consider an explicit raster allow-list (`image/png`, `image/jpeg`, `image/webp`, `image/gif`) or rejecting SVG.
 - **L2 — Legacy `gasPrice`, no absolute fee cap.** `src/services/transaction-service.ts` uses `getGasPrice` + `gas` rather than EIP-1559 fees, and passes reviewed values straight through with no hard ceiling. The review screen (`src/components/send-form.tsx`) shows the estimated fee, which limits the blast radius, but an attacker-controlled RPC can still propose an extreme price. Consider `maxFeePerGas` with a sane cap and a "fee is unusually high" warning.
-- **L3 — NFT metadata fetch follows redirects off the gateways.** `fetchNftJson` in `src/services/nft-service.ts` sets `redirect: "follow"` with no allow-list. `isPrivateHostname` blocks literal private hosts, but a public host can redirect elsewhere, and the fetch **leaks the user's IP address** to arbitrary metadata servers. An explicit gateway allow-list (`ipfs.io`, `arweave.net`, plus your configured gateways) would tighten this.
-- **L4 — Untrusted provider error text reflected into the UI.** `assertNftOwned` appends `error.message`, and several services embed upstream messages. React escapes them so there is no XSS, but untrusted text becomes user-visible — a phishing-adjacent surface. Consider mapping upstream errors to fixed, local strings.
+- **L3 — NFT metadata fetch follows redirects off the gateways.** `fetchNftJson` in `src/services/nft-service.ts` sets `redirect: "follow"` with no allow-list. `isPrivateHostname` blocks literal private hosts, but a public host can redirect elsewhere, and the fetch **leaks the user's IP address** to arbitrary metadata servers.
+
+  **Status: mitigated, with a documented residual.** Gateways must be able to redirect (browsers do not expose intermediate `Location` headers for manual redirects), so the request still uses `redirect: "follow"`. What changed: the **final** `response.url` is validated with `parseSafeRemoteUrl`, so a redirect to a private host, loopback address, or cleartext HTTP is rejected before any metadata is parsed; requests now send `credentials: "omit"` and `referrerPolicy: "no-referrer"`. The residual is inherent to client-side NFT rendering: any metadata or image host still learns the user's IP address. Removing that requires proxying metadata **and** images through the server; a strict gateway allow-list was considered and rejected because it would break NFTs whose metadata is served from their own domain (and `connect-src https:` would have to be narrowed at the same time).
+
+- **L4 — Untrusted provider error text reflected into the UI.** `assertNftOwned` appended `error.message`, and several services embedded upstream messages. React escapes them so there was no XSS, but untrusted text became user-visible — a phishing-adjacent surface.
+
+  **Status: fixed.** Every service boundary that talks to an RPC, contract, or gateway now throws fixed local text and keeps the original error only as `cause` (never rendered): NFT metadata and ownership reads (`src/services/nft-service.ts`, `src/services/wallet-service.ts`), native and ERC-20 estimates/sends (`src/services/transaction-service.ts`), native balances (`src/services/balance-service.ts`), and EIP-7702 delegation reads/revokes (`src/services/account-abstraction-service.ts`). Known viem conditions are matched through the `cause` chain (`src/lib/errors.ts`) so the user still gets actionable wording for insufficient funds, timeouts, nonce races, and contract reverts — without repeating provider strings. The UI keeps rendering `error.message`, which is now a local service contract; tests assert the upstream marker does not appear in any user-visible message.
 - **L5 — Live `ETHERSCAN_API_KEY` on disk.** The key in `.env` is correctly gitignored (`git check-ignore` confirms `.env` matches `.gitignore:34`) and **was never committed** (`git log --all -- .env` returns nothing; only `.env.example` is tracked). It has, however, been read during this audit — treat it as exposed and **rotate it**. Never commit it; never place it in a shared worktree.
 
 ---
@@ -237,7 +242,7 @@ JavaScript strings cannot be zeroized. `lock()` drops the references, but heap c
 - **NFT ownership checks are deliberately asymmetric.** Fail-closed when adding an NFT (an unproven token is refused) and fail-open when pruning (only a definitive "not owned" removes an entry), so a flaky RPC can never wipe the local list (`src/services/nft-service.ts`, `syncNftOwnership`).
 - **Biometric unlock is well isolated.** Password re-confirmation to enroll, PRF verified *before* anything is persisted, record bound to `rpId`, discoverable + user-verified credentials, and `prfOutput` zeroized (`src/core/webauthn.ts`, `src/core/biometric-vault.ts`).
 - **Minimal attack surface.** No third-party scripts, no analytics, no telemetry; API responses are `no-store`; the Etherscan secret is `server-only` and cannot enter the client bundle.
-- **Test coverage.** 259 unit tests across 28 files, including crypto round-trip, wrong-password rejection, deterministic derivation, entropy round-trip, cursor-secret handling, and route abuse controls.
+- **Test coverage.** 275 unit tests across 29 files, including crypto round-trip, wrong-password rejection, deterministic derivation, entropy round-trip, cursor-secret handling, route abuse controls, redirect validation, and provider-text sanitation.
 
 ---
 
@@ -259,5 +264,7 @@ JavaScript strings cannot be zeroized. `lock()` drops the references, but heap c
 | M4 runtime behavior | Verified in dev — wallet import works; revealed key disappears when the 30-second idle lock fires |
 | `pnpm audit` | Failed — registry lacks the advisories endpoint (I1) |
 | Runtime verification | Performed with `next-dev-loop` (`/_next/mcp` clean) plus `pnpm build` |
+| Redirect validation | Covered by unit tests (live metadata hosts were not reachable from the audit network) |
+| Provider-text sanitation | Verified in dev — an EOA NFT contract produced only the fixed "Could not verify NFT ownership…" message, with no provider text |
 
-**Priority order for remediation:** ~~H1~~ → ~~H2 + M1~~ → ~~M2 + M3~~ → ~~M4~~/M5 → L1–L5 → I1.
+**Priority order for remediation:** ~~H1~~ → ~~H2 + M1~~ → ~~M2 + M3~~ → ~~M4 + L3 + L4~~ → M5 → L1/L2 → L5 → I1.

@@ -74,6 +74,21 @@ describe("readDelegatedAddress", () => {
 
     await expect(readDelegatedAddress(ACCOUNT, SEPOLIA)).resolves.toBeNull();
   });
+
+  it("does not reflect provider text when the code read fails", async () => {
+    const providerError = new Error("rpc detail: visit evil.example");
+    getCode.mockRejectedValueOnce(providerError);
+
+    const error = await readDelegatedAddress(ACCOUNT, SEPOLIA).catch(
+      (caught: unknown) => caught,
+    );
+
+    expect((error as Error).message).toBe(
+      "Could not read the account delegation. Check the network and try again.",
+    );
+    expect((error as Error).message).not.toContain("evil.example");
+    expect((error as Error).cause).toBe(providerError);
+  });
 });
 
 describe("revokeDelegation", () => {
@@ -114,6 +129,35 @@ describe("revokeDelegation", () => {
           expect.objectContaining({ address: zeroAddress }),
         ],
       }),
+    );
+  });
+
+  it("does not reflect a revoke failure and keeps the cause", async () => {
+    const providerError = new Error("rpc detail: visit evil.example");
+    sendTransaction.mockRejectedValueOnce(providerError);
+
+    const error = await revokeDelegation({
+      address: ACCOUNT,
+      chainId: SEPOLIA,
+      privateKey,
+    }).catch((caught: unknown) => caught);
+
+    expect((error as Error).message).toBe(
+      "Could not revoke the delegation. Check the network and try again.",
+    );
+    expect((error as Error).message).not.toContain("evil.example");
+    expect((error as Error).cause).toBe(providerError);
+  });
+
+  it("maps insufficient funds when revoking", async () => {
+    const insufficient = new Error("provider detail");
+    insufficient.name = "InsufficientFundsError";
+    sendTransaction.mockRejectedValueOnce(insufficient);
+
+    await expect(
+      revokeDelegation({ address: ACCOUNT, chainId: SEPOLIA, privateKey }),
+    ).rejects.toThrow(
+      "This account does not have enough ETH to cover the transfer and network fee.",
     );
   });
 });

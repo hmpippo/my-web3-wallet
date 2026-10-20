@@ -138,7 +138,11 @@ describe("NFT metadata service", () => {
     ).resolves.toMatchObject({ name: "alice.eth", imageUrl: null });
     expect(fetchMock).toHaveBeenCalledWith(
       "https://ens-metadata-service.appspot.com/name/0x01",
-      expect.objectContaining({ redirect: "follow" }),
+      expect.objectContaining({
+        redirect: "follow",
+        credentials: "omit",
+        referrerPolicy: "no-referrer",
+      }),
     );
   });
 
@@ -272,18 +276,133 @@ describe("NFT metadata service", () => {
     ).rejects.toThrow("256 KiB");
   });
 
-  it("returns an actionable retry message when metadata fetching fails", async () => {
+  it("returns a local message when metadata fetching fails", async () => {
     readContract.mockResolvedValueOnce("https://example.com/metadata.json");
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => {
-        throw new TypeError("Failed to fetch");
+        throw new TypeError("Failed to fetch from evil.example");
       }),
     );
 
+    const error = await readNftMetadata(
+      normalizeNftAddress(CONTRACT),
+      BigInt("1"),
+      "ERC-721",
+      SEPOLIA,
+    ).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(
+      "NFT metadata request failed (network or CORS error).",
+    );
+    expect((error as Error).message).not.toContain("evil.example");
+  });
+
+  it("does not reflect provider text from the tokenURI read", async () => {
+    const providerError = new Error("rpc detail: visit evil.example");
+    readContract.mockRejectedValueOnce(providerError);
+
+    const error = await readNftMetadata(
+      normalizeNftAddress(CONTRACT),
+      BigInt("1"),
+      "ERC-721",
+      SEPOLIA,
+    ).catch((caught: unknown) => caught);
+
+    expect((error as Error).message).toBe(
+      "NFT metadata could not be loaded. Check the contract, token ID, and metadata availability, then retry.",
+    );
+    expect((error as Error).message).not.toContain("evil.example");
+    expect((error as Error).cause).toBe(providerError);
+  });
+
+  it("does not reflect a dropped metadata stream", async () => {
+    readContract.mockResolvedValueOnce("https://example.com/metadata.json");
+    const broken = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.error(new TypeError("socket detail: evil.example"));
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(broken, {
+          headers: { "content-type": "application/json" },
+        }),
+      ),
+    );
+
+    const error = await readNftMetadata(
+      normalizeNftAddress(CONTRACT),
+      BigInt("1"),
+      "ERC-721",
+      SEPOLIA,
+    ).catch((caught: unknown) => caught);
+
+    expect((error as Error).message).toBe(
+      "NFT metadata request failed (network or CORS error).",
+    );
+    expect((error as Error).message).not.toContain("evil.example");
+    expect((error as Error).cause).toBeInstanceOf(TypeError);
+  });
+
+  it("rejects redirects that leave the public HTTPS web", async () => {
+    const privateRedirect = new Response(JSON.stringify({ name: "x" }), {
+      headers: { "content-type": "application/json" },
+    });
+    Object.defineProperty(privateRedirect, "url", {
+      value: "https://localhost/metadata.json",
+    });
+    readContract.mockResolvedValueOnce("https://example.com/metadata.json");
+    vi.stubGlobal("fetch", vi.fn(async () => privateRedirect));
+
     await expect(
-      readNftMetadata(normalizeNftAddress(CONTRACT), BigInt("1"), "ERC-721", SEPOLIA),
-    ).rejects.toThrow(/could not be loaded.*retry/i);
+      readNftMetadata(
+        normalizeNftAddress(CONTRACT),
+        BigInt("1"),
+        "ERC-721",
+        SEPOLIA,
+      ),
+    ).rejects.toThrow("redirected to an unsupported URL");
+
+    const cleartextRedirect = new Response(JSON.stringify({ name: "x" }), {
+      headers: { "content-type": "application/json" },
+    });
+    Object.defineProperty(cleartextRedirect, "url", {
+      value: "http://127.0.0.1/metadata.json",
+    });
+    readContract.mockResolvedValueOnce("https://example.com/metadata.json");
+    vi.stubGlobal("fetch", vi.fn(async () => cleartextRedirect));
+
+    await expect(
+      readNftMetadata(
+        normalizeNftAddress(CONTRACT),
+        BigInt("1"),
+        "ERC-721",
+        SEPOLIA,
+      ),
+    ).rejects.toThrow("redirected to an unsupported URL");
+  });
+
+  it("accepts a redirect to another public HTTPS host", async () => {
+    const redirected = new Response(JSON.stringify({ name: "Redirected NFT" }), {
+      headers: { "content-type": "application/json" },
+    });
+    Object.defineProperty(redirected, "url", {
+      value: "https://ipfs.io/ipfs/bafy/metadata.json",
+    });
+    readContract.mockResolvedValueOnce("https://example.com/metadata.json");
+    vi.stubGlobal("fetch", vi.fn(async () => redirected));
+
+    await expect(
+      readNftMetadata(
+        normalizeNftAddress(CONTRACT),
+        BigInt("1"),
+        "ERC-721",
+        SEPOLIA,
+      ),
+    ).resolves.toMatchObject({ name: "Redirected NFT" });
   });
 
   it("uses a readable fallback name and surfaces invalid JSON", async () => {
@@ -408,16 +527,21 @@ describe("NFT ownership reads", () => {
   });
 
   it("rejects instead of guessing when ownership cannot be determined", async () => {
-    readContract.mockRejectedValueOnce(new Error("execution reverted"));
-    await expect(
-      readNftOwnership(
-        normalizeNftAddress(CONTRACT),
-        BigInt("1"),
-        "ERC-721",
-        OWNER,
-        SEPOLIA,
-      ),
-    ).rejects.toThrow("execution reverted");
+    const providerError = new Error("execution reverted: evil.example");
+    readContract.mockRejectedValueOnce(providerError);
+    const error = await readNftOwnership(
+      normalizeNftAddress(CONTRACT),
+      BigInt("1"),
+      "ERC-721",
+      OWNER,
+      SEPOLIA,
+    ).catch((caught: unknown) => caught);
+
+    expect((error as Error).message).toBe(
+      "Could not verify NFT ownership on chain.",
+    );
+    expect((error as Error).message).not.toContain("evil.example");
+    expect((error as Error).cause).toBe(providerError);
 
     readContract.mockResolvedValueOnce(BigInt("1"));
     await expect(

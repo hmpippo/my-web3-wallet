@@ -10,6 +10,7 @@ import {
   parseSafeRemoteUrl,
   type InlineDataUri,
 } from "@/core/url-safety";
+import { fixedError } from "@/lib/errors";
 
 const MAX_TOKEN_ID = (BigInt("1") << BigInt("256")) - BigInt("1");
 const MAX_METADATA_BYTES = 256 * 1024;
@@ -195,8 +196,12 @@ export async function readNftMetadata(
 ): Promise<StoredWalletNft> {
   const readContract = resolveReadContract(dependencies, chainId);
   const requestFetch = dependencies.fetch ?? globalThis.fetch;
+
+  // Only the contract read can fail with provider-controlled text. Everything
+  // after it throws fixed local messages (URI, size, content type, JSON shape).
+  let uriResult: unknown;
   try {
-    const uriResult =
+    uriResult =
       standard === "ERC-721"
         ? await readContract({
             address,
@@ -210,42 +215,36 @@ export async function readNftMetadata(
             functionName: "uri",
             args: [tokenId],
           });
-    if (typeof uriResult !== "string" || uriResult.trim().length === 0) {
-      throw new Error("The contract returned an empty metadata URI.");
-    }
-    const uri = substituteTokenId(uriResult.trim(), tokenId, standard);
-    const inlineMetadata = readInlineMetadata(uri);
-    let metadataUrl: string | null = null;
-    let metadata: unknown;
-    if (inlineMetadata !== null) {
-      metadata = inlineMetadata;
-    } else {
-      metadataUrl = resolveNftUri(uri);
-      metadata = await fetchNftJson(metadataUrl, requestFetch);
-    }
-    return parseNftMetadata(
-      metadata,
-      {
-        chainId,
-        address,
-        tokenId: tokenId.toString(),
-        standard,
-      },
-      metadataUrl,
-    );
   } catch (error) {
-    if (
-      error instanceof Error &&
-      error.message.startsWith("NFT metadata could not be loaded.")
-    ) {
-      throw error;
-    }
-    throw new Error(
-      `NFT metadata could not be loaded. Check the contract, token ID, and metadata availability, then retry. ${
-        error instanceof Error ? error.message : ""
-      }`.trim(),
+    throw fixedError(
+      "NFT metadata could not be loaded. Check the contract, token ID, and metadata availability, then retry.",
+      error,
     );
   }
+
+  if (typeof uriResult !== "string" || uriResult.trim().length === 0) {
+    throw new Error("The contract returned an empty metadata URI.");
+  }
+  const uri = substituteTokenId(uriResult.trim(), tokenId, standard);
+  const inlineMetadata = readInlineMetadata(uri);
+  let metadataUrl: string | null = null;
+  let metadata: unknown;
+  if (inlineMetadata !== null) {
+    metadata = inlineMetadata;
+  } else {
+    metadataUrl = resolveNftUri(uri);
+    metadata = await fetchNftJson(metadataUrl, requestFetch);
+  }
+  return parseNftMetadata(
+    metadata,
+    {
+      chainId,
+      address,
+      tokenId: tokenId.toString(),
+      standard,
+    },
+    metadataUrl,
+  );
 }
 
 /**
@@ -271,23 +270,33 @@ export async function readNftOwnership(
 ): Promise<boolean> {
   const readContract = resolveReadContract(dependencies, chainId);
   if (standard === "ERC-721") {
-    const tokenOwner = await readContract({
-      address,
-      abi: NFT_OWNER_ABI,
-      functionName: "ownerOf",
-      args: [tokenId],
-    });
+    let tokenOwner: unknown;
+    try {
+      tokenOwner = await readContract({
+        address,
+        abi: NFT_OWNER_ABI,
+        functionName: "ownerOf",
+        args: [tokenId],
+      });
+    } catch (error) {
+      throw fixedError("Could not verify NFT ownership on chain.", error);
+    }
     if (typeof tokenOwner !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(tokenOwner)) {
       throw new Error("The contract did not return a valid owner address.");
     }
     return getAddress(tokenOwner.toLowerCase()) === getAddress(owner.toLowerCase());
   }
-  const balance = await readContract({
-    address,
-    abi: MULTI_TOKEN_BALANCE_ABI,
-    functionName: "balanceOf",
-    args: [owner, tokenId],
-  });
+  let balance: unknown;
+  try {
+    balance = await readContract({
+      address,
+      abi: MULTI_TOKEN_BALANCE_ABI,
+      functionName: "balanceOf",
+      args: [owner, tokenId],
+    });
+  } catch (error) {
+    throw fixedError("Could not verify NFT ownership on chain.", error);
+  }
   if (typeof balance !== "bigint") {
     throw new Error("The contract did not return a valid ERC-1155 balance.");
   }
@@ -304,14 +313,22 @@ async function fetchNftJson(
       method: "GET",
       headers: { Accept: "application/json" },
       // Gateways such as nftstorage.link redirect to another public gateway,
-      // so redirects must be followed. CORS and the initial host checks remain
-      // the guard rails: a redirect that leaves the public web cannot be read
-      // cross-origin from the browser.
+      // so redirects must be followed, and browsers do not expose intermediate
+      // Location headers for a manual redirect. The final URL is readable via
+      // `response.url`, which is checked below.
       redirect: "follow",
+      credentials: "omit",
+      referrerPolicy: "no-referrer",
       signal: AbortSignal.timeout(10_000),
     });
   } catch {
     throw new Error("NFT metadata request failed (network or CORS error).");
+  }
+  // The request has already left the browser, so this cannot prevent the
+  // destination from seeing the user's IP; it does keep content from a private
+  // or non-HTTPS redirect target out of the wallet.
+  if (response.url && !parseSafeRemoteUrl(response.url)) {
+    throw new Error("NFT metadata redirected to an unsupported URL.");
   }
   if (!response.ok) {
     throw new Error(`NFT metadata server returned HTTP ${response.status}.`);
@@ -338,7 +355,18 @@ async function fetchNftJson(
   let totalBytes = 0;
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      let result: ReadableStreamReadResult<Uint8Array>;
+      try {
+        result = await reader.read();
+      } catch (error) {
+        // The connection can drop after the headers arrive; the browser's
+        // error text is not user-facing.
+        throw fixedError(
+          "NFT metadata request failed (network or CORS error).",
+          error,
+        );
+      }
+      const { done, value } = result;
       if (done) break;
       totalBytes += value.byteLength;
       if (totalBytes > MAX_METADATA_BYTES) {
@@ -356,7 +384,12 @@ async function fetchNftJson(
     bytes.set(chunk, offset);
     offset += chunk.byteLength;
   }
-  const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch (error) {
+    throw fixedError("NFT metadata response is not valid UTF-8 JSON.", error);
+  }
 
   try {
     return JSON.parse(text) as unknown;

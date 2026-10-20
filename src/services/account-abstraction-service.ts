@@ -2,6 +2,12 @@ import { createWalletClient, getAddress, http, zeroAddress } from "viem";
 import type { Address, Hash, Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { getChain, getPublicClient, getRpcUrl } from "@/core/chain";
+import {
+  errorNameInChain,
+  fixedError,
+  INSUFFICIENT_FUNDS_MESSAGE,
+  NETWORK_TIMEOUT_MESSAGE,
+} from "@/lib/errors";
 
 /**
  * The EIP-7702 delegation designator prefix.
@@ -32,8 +38,15 @@ export async function readDelegatedAddress(
   address: Address,
   chainId: number,
 ): Promise<Address | null> {
-  const code = await getPublicClient(chainId).getCode({ address });
-  return parseDelegation(code);
+  try {
+    const code = await getPublicClient(chainId).getCode({ address });
+    return parseDelegation(code);
+  } catch (error) {
+    throw fixedError(
+      "Could not read the account delegation. Check the network and try again.",
+      error,
+    );
+  }
 }
 
 export interface RevokeDelegation {
@@ -61,17 +74,30 @@ export async function revokeDelegation({
     transport: http(getRpcUrl(chainId)),
   });
 
-  const authorization = await walletClient.signAuthorization({
-    account,
-    contractAddress: zeroAddress,
-    executor: "self",
-  });
+  try {
+    const authorization = await walletClient.signAuthorization({
+      account,
+      contractAddress: zeroAddress,
+      executor: "self",
+    });
 
-  return walletClient.sendTransaction({
-    account,
-    authorizationList: [authorization],
-    to: address,
-    data: "0x",
-    value: BigInt(0),
-  });
+    return await walletClient.sendTransaction({
+      account,
+      authorizationList: [authorization],
+      to: address,
+      data: "0x",
+      value: BigInt(0),
+    });
+  } catch (error) {
+    if (errorNameInChain(error, ["InsufficientFundsError"])) {
+      throw fixedError(INSUFFICIENT_FUNDS_MESSAGE, error);
+    }
+    if (errorNameInChain(error, ["TimeoutError", "HttpRequestError"])) {
+      throw fixedError(NETWORK_TIMEOUT_MESSAGE, error);
+    }
+    throw fixedError(
+      "Could not revoke the delegation. Check the network and try again.",
+      error,
+    );
+  }
 }

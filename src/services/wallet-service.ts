@@ -1576,10 +1576,10 @@ export class WalletService {
         chainId,
       );
     } catch (error) {
+      // Provider text is untrusted; keep it as the cause, never in the message.
       throw new Error(
-        `Could not verify NFT ownership. Confirm the contract, token ID, and standard, then retry.${
-          error instanceof Error && error.message ? ` ${error.message}` : ""
-        }`,
+        "Could not verify NFT ownership. Confirm the contract, token ID, and standard, then retry.",
+        { cause: error },
       );
     }
     if (!owned) {

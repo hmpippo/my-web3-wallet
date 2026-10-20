@@ -8,6 +8,11 @@ import {
 import type { Address, Hex, Hash } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { getChain, getPublicClient, getRpcUrl } from "@/core/chain";
+import {
+  errorNameInChain,
+  INSUFFICIENT_FUNDS_MESSAGE,
+  NETWORK_TIMEOUT_MESSAGE,
+} from "@/lib/errors";
 
 export interface NativeTransfer {
   to: Address;
@@ -71,11 +76,15 @@ export async function estimateNativeTransfer(params: {
   }
 
   const client = getPublicClient(chainId);
-  const [gas, gasPrice] = await Promise.all([
-    client.estimateGas({ account: from, to, value }),
-    client.getGasPrice(),
-  ]);
-  return { gas, gasPrice, estimatedFee: gas * gasPrice };
+  try {
+    const [gas, gasPrice] = await Promise.all([
+      client.estimateGas({ account: from, to, value }),
+      client.getGasPrice(),
+    ]);
+    return { gas, gasPrice, estimatedFee: gas * gasPrice };
+  } catch (error) {
+    throw transferError(error, "native", "estimate");
+  }
 }
 
 export async function sendNativeTransfer({
@@ -91,30 +100,34 @@ export async function sendNativeTransfer({
     throw new RangeError("Transfer value must be greater than zero");
   }
 
-  const account = privateKeyToAccount(privateKey);
-  const { gas, gasPrice } =
-    reviewedGas !== undefined && reviewedGasPrice !== undefined
-      ? { gas: reviewedGas, gasPrice: reviewedGasPrice }
-      : await estimateNativeTransfer({
-          from: account.address,
-          to: normalizedTo,
-          value,
-          chainId,
-        });
+  try {
+    const account = privateKeyToAccount(privateKey);
+    const { gas, gasPrice } =
+      reviewedGas !== undefined && reviewedGasPrice !== undefined
+        ? { gas: reviewedGas, gasPrice: reviewedGasPrice }
+        : await estimateNativeTransfer({
+            from: account.address,
+            to: normalizedTo,
+            value,
+            chainId,
+          });
 
-  const walletClient = createWalletClient({
-    account,
-    chain: getChain(chainId),
-    transport: http(getRpcUrl(chainId)),
-  });
+    const walletClient = createWalletClient({
+      account,
+      chain: getChain(chainId),
+      transport: http(getRpcUrl(chainId)),
+    });
 
-  return walletClient.sendTransaction({
-    account,
-    to: normalizedTo,
-    value,
-    gas,
-    gasPrice,
-  });
+    return await walletClient.sendTransaction({
+      account,
+      to: normalizedTo,
+      value,
+      gas,
+      gasPrice,
+    });
+  } catch (error) {
+    throw transferError(error, "native", "send");
+  }
 }
 
 export async function estimateErc20Transfer(params: {
@@ -133,11 +146,15 @@ export async function estimateErc20Transfer(params: {
 
   const data = encodeErc20Transfer(to, amount);
   const client = getPublicClient(chainId);
-  const [gas, gasPrice] = await Promise.all([
-    client.estimateGas({ account: from, to: token, data }),
-    client.getGasPrice(),
-  ]);
-  return { gas, gasPrice, estimatedFee: gas * gasPrice };
+  try {
+    const [gas, gasPrice] = await Promise.all([
+      client.estimateGas({ account: from, to: token, data }),
+      client.getGasPrice(),
+    ]);
+    return { gas, gasPrice, estimatedFee: gas * gasPrice };
+  } catch (error) {
+    throw transferError(error, "token", "estimate");
+  }
 }
 
 export async function sendErc20Transfer({
@@ -156,32 +173,85 @@ export async function sendErc20Transfer({
   }
 
   const data = encodeErc20Transfer(normalizedTo, amount);
-  const account = privateKeyToAccount(privateKey);
-  const { gas, gasPrice } =
-    reviewedGas !== undefined && reviewedGasPrice !== undefined
-      ? { gas: reviewedGas, gasPrice: reviewedGasPrice }
-      : await estimateErc20Transfer({
-          from: account.address,
-          token: normalizedToken,
-          to: normalizedTo,
-          amount,
-          chainId,
-        });
+  try {
+    const account = privateKeyToAccount(privateKey);
+    const { gas, gasPrice } =
+      reviewedGas !== undefined && reviewedGasPrice !== undefined
+        ? { gas: reviewedGas, gasPrice: reviewedGasPrice }
+        : await estimateErc20Transfer({
+            from: account.address,
+            token: normalizedToken,
+            to: normalizedTo,
+            amount,
+            chainId,
+          });
 
-  const walletClient = createWalletClient({
-    account,
-    chain: getChain(chainId),
-    transport: http(getRpcUrl(chainId)),
-  });
+    const walletClient = createWalletClient({
+      account,
+      chain: getChain(chainId),
+      transport: http(getRpcUrl(chainId)),
+    });
 
-  return walletClient.sendTransaction({
-    account,
-    to: normalizedToken,
-    data,
-    value: BigInt(0),
-    gas,
-    gasPrice,
-  });
+    return await walletClient.sendTransaction({
+      account,
+      to: normalizedToken,
+      data,
+      value: BigInt(0),
+      gas,
+      gasPrice,
+    });
+  } catch (error) {
+    throw transferError(error, "token", "send");
+  }
+}
+
+class TransferError extends Error {}
+
+type TransferKind = "native" | "token";
+type TransferAction = "estimate" | "send";
+
+/**
+ * Maps a provider/viem failure to fixed local text. Known conditions keep
+ * actionable wording; everything else gets an operation-specific fallback.
+ * The original error is retained as `cause` and never rendered.
+ */
+function transferError(
+  error: unknown,
+  kind: TransferKind,
+  action: TransferAction,
+): Error {
+  if (error instanceof TransferError) return error;
+
+  if (errorNameInChain(error, ["InsufficientFundsError"])) {
+    return new TransferError(INSUFFICIENT_FUNDS_MESSAGE, { cause: error });
+  }
+  if (errorNameInChain(error, ["TimeoutError", "HttpRequestError"])) {
+    return new TransferError(NETWORK_TIMEOUT_MESSAGE, { cause: error });
+  }
+  if (errorNameInChain(error, ["NonceTooLowError"])) {
+    return new TransferError(
+      "The account nonce changed before the transaction was sent. Refresh and try again.",
+      { cause: error },
+    );
+  }
+  if (errorNameInChain(error, ["ContractFunctionRevertedError"])) {
+    return new TransferError(
+      kind === "token"
+        ? "The token contract rejected the transfer. Check the amount and token rules."
+        : "The transaction was rejected by the contract.",
+      { cause: error },
+    );
+  }
+
+  const message =
+    action === "estimate"
+      ? kind === "token"
+        ? "Could not estimate the token transfer fee. Check your connection and try again."
+        : "Could not estimate the transfer fee. Check your connection and try again."
+      : kind === "token"
+        ? "The token transfer could not be sent. Check your connection and try again."
+        : "The transaction could not be sent. Check your connection and try again.";
+  return new TransferError(message, { cause: error });
 }
 
 function validateRecipient(address: Address): Address {

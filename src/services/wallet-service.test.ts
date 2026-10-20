@@ -844,25 +844,32 @@ describe("WalletService", () => {
 
   it("fails closed when NFT ownership cannot be read", async () => {
     const { storage, getAccountMetadata } = createStorage();
+    const upstreamError = new Error("execution reverted: evil.example");
     const service = new WalletService({
       storage,
       readNftMetadata: vi.fn(async () => {
         throw new Error("should not read metadata when ownership is unknown");
       }),
       readNftOwnership: vi.fn(async () => {
-        throw new Error("execution reverted");
+        throw upstreamError;
       }),
     });
     await service.importWallet(TEST_MNEMONIC, "correct horse");
 
-    await expect(
-      service.addNft(
+    const thrown = await service
+      .addNft(
         "0x0000000000000000000000000000000000000001",
         "42",
         "ERC-1155",
         SEPOLIA,
-      ),
-    ).rejects.toThrow(/Could not verify NFT ownership.*execution reverted/);
+      )
+      .catch((caught: unknown) => caught);
+
+    expect((thrown as Error).message).toBe(
+      "Could not verify NFT ownership. Confirm the contract, token ID, and standard, then retry.",
+    );
+    expect((thrown as Error).message).not.toContain("execution reverted");
+    expect((thrown as Error).cause).toBe(upstreamError);
     expect(service.getState().accounts[0]?.nfts).toEqual([]);
     expect(getAccountMetadata()?.accounts[0]?.nfts).toBeUndefined();
   });

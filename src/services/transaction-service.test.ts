@@ -26,6 +26,7 @@ vi.mock("viem", async (importOriginal) => {
 import {
   encodeErc20Transfer,
   estimateErc20Transfer,
+  estimateNativeTransfer,
   sendErc20Transfer,
   sendNativeTransfer,
 } from "./transaction-service";
@@ -204,5 +205,94 @@ describe("ERC-20 transfer", () => {
       gasPrice: BigInt(10),
       estimatedFee: BigInt(600_000),
     });
+  });
+});
+
+describe("provider error sanitation", () => {
+  const to = "0x0000000000000000000000000000000000000001";
+  const token = "0x0000000000000000000000000000000000000009";
+  const privateKey = `0x${"1".repeat(64)}` as `0x${string}`;
+
+  function named(name: string, message = "provider detail"): Error {
+    const error = new Error(message);
+    error.name = name;
+    return error;
+  }
+
+  beforeEach(() => {
+    estimateGas.mockReset().mockResolvedValue(BigInt(21_000));
+    getGasPrice.mockReset().mockResolvedValue(BigInt(10));
+    sendTransaction.mockReset();
+    walletClientFactory.mockReset().mockReturnValue({ sendTransaction });
+  });
+
+  it("maps insufficient funds to fixed local text", async () => {
+    estimateGas.mockRejectedValueOnce(named("InsufficientFundsError"));
+
+    const error = await estimateNativeTransfer({
+      from: to,
+      to,
+      value: BigInt(1),
+      chainId: SEPOLIA,
+    }).catch((caught: unknown) => caught);
+
+    expect((error as Error).message).toBe(
+      "This account does not have enough ETH to cover the transfer and network fee.",
+    );
+    expect((error as Error).message).not.toContain("provider detail");
+    expect((error as Error).cause).toBeInstanceOf(Error);
+  });
+
+  it("does not reflect a send failure and keeps the original cause", async () => {
+    const providerError = new Error("rpc detail: visit evil.example");
+    sendTransaction.mockRejectedValueOnce(providerError);
+
+    const error = await sendNativeTransfer({
+      to,
+      value: BigInt(1),
+      chainId: SEPOLIA,
+      privateKey,
+    }).catch((caught: unknown) => caught);
+
+    expect((error as Error).message).toBe(
+      "The transaction could not be sent. Check your connection and try again.",
+    );
+    expect((error as Error).message).not.toContain("evil.example");
+    expect((error as Error).cause).toBe(providerError);
+  });
+
+  it("maps a nested contract revert for a token transfer", async () => {
+    const revert = named("ContractFunctionRevertedError");
+    const execution = new Error("execution failed", { cause: revert });
+    sendTransaction.mockRejectedValueOnce(execution);
+
+    const error = await sendErc20Transfer({
+      token,
+      to,
+      amount: BigInt(1),
+      chainId: SEPOLIA,
+      privateKey,
+    }).catch((caught: unknown) => caught);
+
+    expect((error as Error).message).toBe(
+      "The token contract rejected the transfer. Check the amount and token rules.",
+    );
+    expect((error as Error).cause).toBe(execution);
+  });
+
+  it("maps timeouts during ERC-20 estimation", async () => {
+    estimateGas.mockRejectedValueOnce(named("TimeoutError"));
+
+    await expect(
+      estimateErc20Transfer({
+        from: to,
+        token,
+        to,
+        amount: BigInt(1),
+        chainId: SEPOLIA,
+      }),
+    ).rejects.toThrow(
+      "The network request timed out. Check your connection and try again.",
+    );
   });
 });

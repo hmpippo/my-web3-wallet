@@ -103,8 +103,11 @@ decoded in place, `ipfs://` is resolved through `https://ipfs.io`, `ar://`
 through `https://arweave.net`, and HTTPS URLs (including scheme-less `host/path`
 values that some contracts return) are fetched directly. Metadata and image
 links are untrusted public content; only public HTTPS and inline images are
-used, loopback/private hosts are refused, metadata responses are capped at
-256 KiB, and descriptions are rendered as text. A broken or oversized `image`
+used, loopback/private hosts are refused, redirects are accepted only when the
+final URL is still public HTTPS, metadata requests omit credentials and
+referrers, responses are capped at 256 KiB, and descriptions are rendered as
+text. The metadata or image host still sees your IP address; only a proxy would
+hide it. A broken or oversized `image`
 field only drops the picture, never the NFT entry. NFT records are public
 display metadata stored per account, and ownership is verified on chain: adding
 an entry calls `ownerOf` (ERC-721) or `balanceOf` (ERC-1155) and refuses tokens
@@ -116,7 +119,8 @@ reverting `ownerOf` (for example a burned token) or an unreachable RPC keeps the
 entry, so a network hiccup can never silently wipe the list. The wallet still
 never discovers NFTs automatically. Removing an entry only removes it from the
 local list and has no on-chain effect. Metadata fetch, CORS, gateway, or
-ownership-read errors are surfaced so the user can retry.
+ownership-read errors are surfaced as fixed local messages so the user can
+retry; raw provider or gateway text is never rendered.
 
 ## Biometric unlock
 

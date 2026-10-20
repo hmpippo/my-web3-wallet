@@ -19,3 +19,22 @@ describe("native balance service", () => {
     expect(getBalance).toHaveBeenCalledWith({ address });
   });
 });
+
+describe("balance error sanitation", () => {
+  const address = "0x0000000000000000000000000000000000000001";
+
+  it("does not reflect provider text", async () => {
+    const providerError = new Error("rpc detail: visit evil.example");
+    getBalance.mockRejectedValueOnce(providerError);
+
+    const error = await getNativeBalance(address, 11155111).catch(
+      (caught: unknown) => caught,
+    );
+
+    expect((error as Error).message).toBe(
+      "Could not load the native balance. Check your connection and try again.",
+    );
+    expect((error as Error).message).not.toContain("evil.example");
+    expect((error as Error).cause).toBe(providerError);
+  });
+});
