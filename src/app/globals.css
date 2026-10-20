@@ -2390,3 +2390,20 @@ input {
 
 
 
+
+/* --- High network fee warning --- */
+
+.fee-warning {
+  margin: 0 0 1.25rem;
+  border: 1px solid var(--warning-line);
+  border-radius: 0.85rem;
+  background: var(--warning-bg);
+  color: var(--warning);
+  padding: 0.8rem 1rem;
+  font-size: 0.8rem;
+  line-height: 1.55;
+}
+
+.fee-warning strong {
+  color: var(--warning-strong);
+}

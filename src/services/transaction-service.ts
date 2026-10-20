@@ -9,6 +9,11 @@ import type { Address, Hex, Hash } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { getChain, getPublicClient, getRpcUrl } from "@/core/chain";
 import {
+  NetworkFeeError,
+  validateNetworkFee,
+  type NetworkFee,
+} from "@/core/fees";
+import {
   errorNameInChain,
   INSUFFICIENT_FUNDS_MESSAGE,
   NETWORK_TIMEOUT_MESSAGE,
@@ -20,13 +25,13 @@ export interface NativeTransfer {
   chainId: number;
   privateKey: Hex;
   gas?: bigint;
-  gasPrice?: bigint;
+  maxFeePerGas?: bigint;
+  maxPriorityFeePerGas?: bigint;
 }
 
-export interface NativeTransferEstimate {
-  gas: bigint;
-  gasPrice: bigint;
-  estimatedFee: bigint;
+export interface NativeTransferEstimate extends NetworkFee {
+  /** `gas * maxFeePerGas`; the most this transaction can cost. */
+  maxTotalFee: bigint;
 }
 
 /** An ERC-20 estimate has the same shape as a native transfer estimate. */
@@ -39,7 +44,8 @@ export interface Erc20Transfer {
   chainId: number;
   privateKey: Hex;
   gas?: bigint;
-  gasPrice?: bigint;
+  maxFeePerGas?: bigint;
+  maxPriorityFeePerGas?: bigint;
 }
 
 const erc20TransferAbi = [
@@ -76,15 +82,18 @@ export async function estimateNativeTransfer(params: {
   }
 
   const client = getPublicClient(chainId);
+  let gas: bigint;
+  let fees: { maxFeePerGas?: bigint; maxPriorityFeePerGas?: bigint };
   try {
-    const [gas, gasPrice] = await Promise.all([
+    [gas, fees] = await Promise.all([
       client.estimateGas({ account: from, to, value }),
-      client.getGasPrice(),
+      client.estimateFeesPerGas(),
     ]);
-    return { gas, gasPrice, estimatedFee: gas * gasPrice };
   } catch (error) {
     throw transferError(error, "native", "estimate");
   }
+
+  return buildEstimate(gas, fees);
 }
 
 export async function sendNativeTransfer({
@@ -93,24 +102,31 @@ export async function sendNativeTransfer({
   chainId,
   privateKey,
   gas: reviewedGas,
-  gasPrice: reviewedGasPrice,
+  maxFeePerGas: reviewedMaxFeePerGas,
+  maxPriorityFeePerGas: reviewedMaxPriorityFeePerGas,
 }: NativeTransfer): Promise<Hash> {
   const normalizedTo = validateRecipient(to);
   if (value <= BigInt(0)) {
     throw new RangeError("Transfer value must be greater than zero");
   }
+  // Validate the reviewed snapshot before any network work, so a tampered or
+  // stale review can never be signed even if it bypassed the UI checks.
+  const reviewedFee = parseReviewedFee({
+    gas: reviewedGas,
+    maxFeePerGas: reviewedMaxFeePerGas,
+    maxPriorityFeePerGas: reviewedMaxPriorityFeePerGas,
+  });
 
   try {
     const account = privateKeyToAccount(privateKey);
-    const { gas, gasPrice } =
-      reviewedGas !== undefined && reviewedGasPrice !== undefined
-        ? { gas: reviewedGas, gasPrice: reviewedGasPrice }
-        : await estimateNativeTransfer({
-            from: account.address,
-            to: normalizedTo,
-            value,
-            chainId,
-          });
+    const fee =
+      reviewedFee ??
+      (await estimateNativeTransfer({
+        from: account.address,
+        to: normalizedTo,
+        value,
+        chainId,
+      }));
 
     const walletClient = createWalletClient({
       account,
@@ -122,8 +138,9 @@ export async function sendNativeTransfer({
       account,
       to: normalizedTo,
       value,
-      gas,
-      gasPrice,
+      gas: fee.gas,
+      maxFeePerGas: fee.maxFeePerGas,
+      maxPriorityFeePerGas: fee.maxPriorityFeePerGas,
     });
   } catch (error) {
     throw transferError(error, "native", "send");
@@ -146,15 +163,18 @@ export async function estimateErc20Transfer(params: {
 
   const data = encodeErc20Transfer(to, amount);
   const client = getPublicClient(chainId);
+  let gas: bigint;
+  let fees: { maxFeePerGas?: bigint; maxPriorityFeePerGas?: bigint };
   try {
-    const [gas, gasPrice] = await Promise.all([
+    [gas, fees] = await Promise.all([
       client.estimateGas({ account: from, to: token, data }),
-      client.getGasPrice(),
+      client.estimateFeesPerGas(),
     ]);
-    return { gas, gasPrice, estimatedFee: gas * gasPrice };
   } catch (error) {
     throw transferError(error, "token", "estimate");
   }
+
+  return buildEstimate(gas, fees);
 }
 
 export async function sendErc20Transfer({
@@ -164,7 +184,8 @@ export async function sendErc20Transfer({
   chainId,
   privateKey,
   gas: reviewedGas,
-  gasPrice: reviewedGasPrice,
+  maxFeePerGas: reviewedMaxFeePerGas,
+  maxPriorityFeePerGas: reviewedMaxPriorityFeePerGas,
 }: Erc20Transfer): Promise<Hash> {
   const normalizedToken = validateToken(token);
   const normalizedTo = validateRecipient(to);
@@ -173,18 +194,22 @@ export async function sendErc20Transfer({
   }
 
   const data = encodeErc20Transfer(normalizedTo, amount);
+  const reviewedFee = parseReviewedFee({
+    gas: reviewedGas,
+    maxFeePerGas: reviewedMaxFeePerGas,
+    maxPriorityFeePerGas: reviewedMaxPriorityFeePerGas,
+  });
   try {
     const account = privateKeyToAccount(privateKey);
-    const { gas, gasPrice } =
-      reviewedGas !== undefined && reviewedGasPrice !== undefined
-        ? { gas: reviewedGas, gasPrice: reviewedGasPrice }
-        : await estimateErc20Transfer({
-            from: account.address,
-            token: normalizedToken,
-            to: normalizedTo,
-            amount,
-            chainId,
-          });
+    const fee =
+      reviewedFee ??
+      (await estimateErc20Transfer({
+        from: account.address,
+        token: normalizedToken,
+        to: normalizedTo,
+        amount,
+        chainId,
+      }));
 
     const walletClient = createWalletClient({
       account,
@@ -197,12 +222,74 @@ export async function sendErc20Transfer({
       to: normalizedToken,
       data,
       value: BigInt(0),
-      gas,
-      gasPrice,
+      gas: fee.gas,
+      maxFeePerGas: fee.maxFeePerGas,
+      maxPriorityFeePerGas: fee.maxPriorityFeePerGas,
     });
   } catch (error) {
     throw transferError(error, "token", "send");
   }
+}
+
+/**
+ * Builds a validated EIP-1559 estimate. Runs outside the provider try/catch so
+ * a policy failure surfaces with its own message instead of the generic
+ * "could not estimate" text.
+ */
+function buildEstimate(
+  gas: bigint,
+  fees: { maxFeePerGas?: bigint; maxPriorityFeePerGas?: bigint },
+): NativeTransferEstimate {
+  if (
+    typeof fees.maxFeePerGas !== "bigint" ||
+    typeof fees.maxPriorityFeePerGas !== "bigint"
+  ) {
+    throw new NetworkFeeError(
+      "This network did not return EIP-1559 fees. Try again later.",
+    );
+  }
+  const maxTotalFee = validateNetworkFee({
+    gas,
+    maxFeePerGas: fees.maxFeePerGas,
+    maxPriorityFeePerGas: fees.maxPriorityFeePerGas,
+  });
+  return {
+    gas,
+    maxFeePerGas: fees.maxFeePerGas,
+    maxPriorityFeePerGas: fees.maxPriorityFeePerGas,
+    maxTotalFee,
+  };
+}
+
+/**
+ * A reviewed fee must be complete: signing a partially reviewed transfer would
+ * silently re-estimate some fields and sign fees the user never saw.
+ */
+function parseReviewedFee({
+  gas,
+  maxFeePerGas,
+  maxPriorityFeePerGas,
+}: {
+  gas?: bigint;
+  maxFeePerGas?: bigint;
+  maxPriorityFeePerGas?: bigint;
+}): NetworkFee | null {
+  const anyProvided =
+    gas !== undefined ||
+    maxFeePerGas !== undefined ||
+    maxPriorityFeePerGas !== undefined;
+  if (!anyProvided) return null;
+  if (
+    gas === undefined ||
+    maxFeePerGas === undefined ||
+    maxPriorityFeePerGas === undefined
+  ) {
+    throw new NetworkFeeError(
+      "The reviewed fee is incomplete. Estimate the transfer again.",
+    );
+  }
+  validateNetworkFee({ gas, maxFeePerGas, maxPriorityFeePerGas });
+  return { gas, maxFeePerGas, maxPriorityFeePerGas };
 }
 
 class TransferError extends Error {}
@@ -220,6 +307,7 @@ function transferError(
   kind: TransferKind,
   action: TransferAction,
 ): Error {
+  if (error instanceof NetworkFeeError) return error;
   if (error instanceof TransferError) return error;
 
   if (errorNameInChain(error, ["InsufficientFundsError"])) {
@@ -227,6 +315,12 @@ function transferError(
   }
   if (errorNameInChain(error, ["TimeoutError", "HttpRequestError"])) {
     return new TransferError(NETWORK_TIMEOUT_MESSAGE, { cause: error });
+  }
+  if (errorNameInChain(error, ["Eip1559FeesNotSupportedError"])) {
+    return new TransferError(
+      "This network does not support EIP-1559 fees.",
+      { cause: error },
+    );
   }
   if (errorNameInChain(error, ["NonceTooLowError"])) {
     return new TransferError(

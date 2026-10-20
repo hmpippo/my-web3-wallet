@@ -31,7 +31,7 @@ Remediation so far: **H1** (CSP and headers), **H2** (IndexedDB), **M1** (30-sec
 | M4 | Medium | Secret residue in un-zeroizable JS strings — **mitigated**, residual documented |
 | M5 | Medium | Single trusted RPC for balances, nonce, gas, broadcast, delegation reads |
 | L1 | Low | `data:image/svg+xml` accepted as an NFT image |
-| L2 | Low | Legacy `gasPrice` pricing, no absolute fee cap |
+| L2 | Low | EIP-1559 fees with hard caps — **mitigated**, residual documented |
 | L3 | Low | NFT metadata redirects and IP visibility — **mitigated**, residual documented |
 | L4 | Low | Untrusted provider error text reflected into the UI — **fixed** |
 | L5 | Low | Live `ETHERSCAN_API_KEY` on disk in `.env` |
@@ -213,7 +213,9 @@ JavaScript strings cannot be zeroized. `lock()` drops the references, but heap c
 ## 4. Low severity
 
 - **L1 — `data:image/svg+xml` accepted.** `isImageMediaType` in `src/core/url-safety.ts` is `startsWith("image/")`, so SVG is allowed. It renders via `<img>` in `src/components/nft-portfolio.tsx`, where SVG scripts do **not** execute, so this is **not XSS** — but it permits convincing fake-UI/phishing images and inflates `localStorage`. Consider an explicit raster allow-list (`image/png`, `image/jpeg`, `image/webp`, `image/gif`) or rejecting SVG.
-- **L2 — Legacy `gasPrice`, no absolute fee cap.** `src/services/transaction-service.ts` uses `getGasPrice` + `gas` rather than EIP-1559 fees, and passes reviewed values straight through with no hard ceiling. The review screen (`src/components/send-form.tsx`) shows the estimated fee, which limits the blast radius, but an attacker-controlled RPC can still propose an extreme price. Consider `maxFeePerGas` with a sane cap and a "fee is unusually high" warning.
+- **L2 — Legacy `gasPrice`, no absolute fee cap.** `src/services/transaction-service.ts` used `getGasPrice` + `gas` rather than EIP-1559 fees, and passed reviewed values straight through with no hard ceiling. The review screen (`src/components/send-form.tsx`) showed the estimated fee, which limited the blast radius, but an attacker-controlled RPC could still propose an extreme price.
+
+  **Status: mitigated, with documented residuals.** Transfers and EIP-7702 revokes now use `estimateFeesPerGas` and sign explicit `maxFeePerGas` / `maxPriorityFeePerGas` values; legacy `gasPrice` is no longer sent. `src/core/fees.ts` enforces hard ceilings on both fresh estimates and the reviewed snapshot: gas limit ≤ 1,000,000, max fee ≤ 1,000 gwei, priority fee ≤ 50 gwei (and ≤ max fee), and total maximum fee ≤ 0.1 native token. A partial review is rejected instead of re-estimating, so the signed numbers always match what was shown. The review screen displays gas limit, max fee per gas, priority fee, maximum network fee, and maximum total, and shows an amber warning at 100 gwei or 0.01 native. Residuals: the RPC still chooses the base-fee proposal and gas estimate within those ceilings; a hard cap can block a legitimate send during extreme congestion; OP/Base L1 data fees are charged on top of the displayed execution fee, as before; and the node requires the balance to cover the maximum fee, so an account that could afford only the actual fee may need more funds to send.
 - **L3 — NFT metadata fetch follows redirects off the gateways.** `fetchNftJson` in `src/services/nft-service.ts` sets `redirect: "follow"` with no allow-list. `isPrivateHostname` blocks literal private hosts, but a public host can redirect elsewhere, and the fetch **leaks the user's IP address** to arbitrary metadata servers.
 
   **Status: mitigated, with a documented residual.** Gateways must be able to redirect (browsers do not expose intermediate `Location` headers for manual redirects), so the request still uses `redirect: "follow"`. What changed: the **final** `response.url` is validated with `parseSafeRemoteUrl`, so a redirect to a private host, loopback address, or cleartext HTTP is rejected before any metadata is parsed; requests now send `credentials: "omit"` and `referrerPolicy: "no-referrer"`. The residual is inherent to client-side NFT rendering: any metadata or image host still learns the user's IP address. Removing that requires proxying metadata **and** images through the server; a strict gateway allow-list was considered and rejected because it would break NFTs whose metadata is served from their own domain (and `connect-src https:` would have to be narrowed at the same time).
@@ -242,7 +244,7 @@ JavaScript strings cannot be zeroized. `lock()` drops the references, but heap c
 - **NFT ownership checks are deliberately asymmetric.** Fail-closed when adding an NFT (an unproven token is refused) and fail-open when pruning (only a definitive "not owned" removes an entry), so a flaky RPC can never wipe the local list (`src/services/nft-service.ts`, `syncNftOwnership`).
 - **Biometric unlock is well isolated.** Password re-confirmation to enroll, PRF verified *before* anything is persisted, record bound to `rpId`, discoverable + user-verified credentials, and `prfOutput` zeroized (`src/core/webauthn.ts`, `src/core/biometric-vault.ts`).
 - **Minimal attack surface.** No third-party scripts, no analytics, no telemetry; API responses are `no-store`; the Etherscan secret is `server-only` and cannot enter the client bundle.
-- **Test coverage.** 275 unit tests across 29 files, including crypto round-trip, wrong-password rejection, deterministic derivation, entropy round-trip, cursor-secret handling, route abuse controls, redirect validation, and provider-text sanitation.
+- **Test coverage.** 298 unit tests across 30 files, including crypto round-trip, wrong-password rejection, deterministic derivation, entropy round-trip, cursor-secret handling, route abuse controls, redirect validation, provider-text sanitation, and EIP-1559 fee caps.
 
 ---
 
@@ -266,5 +268,7 @@ JavaScript strings cannot be zeroized. `lock()` drops the references, but heap c
 | Runtime verification | Performed with `next-dev-loop` (`/_next/mcp` clean) plus `pnpm build` |
 | Redirect validation | Covered by unit tests (live metadata hosts were not reachable from the audit network) |
 | Provider-text sanitation | Verified in dev — an EOA NFT contract produced only the fixed "Could not verify NFT ownership…" message, with no provider text |
+| EIP-1559 fee caps | Unit-tested; verified in dev that the review shows gas limit, max fee, priority fee, and maximum total |
+| EIP-1559 broadcast | Verified on Base Sepolia — a type-2 transfer and a type-4 delegation revoke both confirmed with explicit `maxFeePerGas` / `maxPriorityFeePerGas` |
 
-**Priority order for remediation:** ~~H1~~ → ~~H2 + M1~~ → ~~M2 + M3~~ → ~~M4 + L3 + L4~~ → M5 → L1/L2 → L5 → I1.
+**Priority order for remediation:** ~~H1~~ → ~~H2 + M1~~ → ~~M2 + M3~~ → ~~M4 + L2 + L3 + L4~~ → M5 → L1 → L5 → I1.

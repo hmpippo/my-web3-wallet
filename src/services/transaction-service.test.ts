@@ -1,15 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { estimateGas, getGasPrice, sendTransaction, walletClientFactory } =
+const { estimateGas, estimateFeesPerGas, sendTransaction, walletClientFactory } =
   vi.hoisted(() => ({
     estimateGas: vi.fn(),
-    getGasPrice: vi.fn(),
+    estimateFeesPerGas: vi.fn(),
     sendTransaction: vi.fn(),
     walletClientFactory: vi.fn(),
   }));
 
 vi.mock("@/core/chain", () => ({
-  getPublicClient: () => ({ estimateGas, getGasPrice }),
+  getPublicClient: () => ({ estimateGas, estimateFeesPerGas }),
   getChain: () => ({ id: 11155111 }),
   getRpcUrl: () => "https://rpc.test",
 }));
@@ -23,6 +23,7 @@ vi.mock("viem", async (importOriginal) => {
   };
 });
 
+import { MAX_FEE_PER_GAS, MAX_GAS_LIMIT } from "@/core/fees";
 import {
   encodeErc20Transfer,
   estimateErc20Transfer,
@@ -32,11 +33,12 @@ import {
 } from "./transaction-service";
 
 const SEPOLIA = 11155111;
+const FEES = { maxFeePerGas: BigInt(20), maxPriorityFeePerGas: BigInt(2) };
 
 describe("native transfer validation", () => {
   beforeEach(() => {
     estimateGas.mockReset().mockResolvedValue(BigInt(21_000));
-    getGasPrice.mockReset().mockResolvedValue(BigInt(10));
+    estimateFeesPerGas.mockReset().mockResolvedValue(FEES);
     sendTransaction.mockReset().mockResolvedValue(
       `0x${"a".repeat(64)}`,
     );
@@ -65,7 +67,7 @@ describe("native transfer validation", () => {
     ).rejects.toThrow("greater than zero");
   });
 
-  it("estimates gas and gas price before sending a native transfer", async () => {
+  it("estimates gas and EIP-1559 fees before sending a native transfer", async () => {
     const to = "0x0000000000000000000000000000000000000001";
     const privateKey = `0x${"1".repeat(64)}` as `0x${string}`;
     const value = BigInt(123);
@@ -78,31 +80,49 @@ describe("native transfer validation", () => {
     expect(estimateGas).toHaveBeenCalledWith(
       expect.objectContaining({ to, value }),
     );
-    expect(getGasPrice).toHaveBeenCalledOnce();
+    expect(estimateFeesPerGas).toHaveBeenCalledOnce();
     expect(walletClientFactory).toHaveBeenCalledOnce();
-    expect(sendTransaction).toHaveBeenCalledWith(
+    const sent = sendTransaction.mock.calls[0]?.[0];
+    expect(sent).toEqual(
       expect.objectContaining({
         to,
         value,
         gas: BigInt(21_000),
-        gasPrice: BigInt(10),
+        maxFeePerGas: FEES.maxFeePerGas,
+        maxPriorityFeePerGas: FEES.maxPriorityFeePerGas,
       }),
     );
+    expect(sent).not.toHaveProperty("gasPrice");
   });
 
-  it("sends with the exact gas parameters shown in the review", async () => {
+  it("sends with the exact fee parameters shown in the review", async () => {
     const to = "0x0000000000000000000000000000000000000001";
     const privateKey = `0x${"1".repeat(64)}` as `0x${string}`;
     const value = BigInt(123);
     const gas = BigInt(23_000);
-    const gasPrice = BigInt(12);
+    const maxFeePerGas = BigInt(12);
+    const maxPriorityFeePerGas = BigInt(1);
 
-    await sendNativeTransfer({ to, value, chainId: SEPOLIA, privateKey, gas, gasPrice });
+    await sendNativeTransfer({
+      to,
+      value,
+      chainId: SEPOLIA,
+      privateKey,
+      gas,
+      maxFeePerGas,
+      maxPriorityFeePerGas,
+    });
 
     expect(estimateGas).not.toHaveBeenCalled();
-    expect(getGasPrice).not.toHaveBeenCalled();
+    expect(estimateFeesPerGas).not.toHaveBeenCalled();
     expect(sendTransaction).toHaveBeenCalledWith(
-      expect.objectContaining({ to, value, gas, gasPrice }),
+      expect.objectContaining({
+        to,
+        value,
+        gas,
+        maxFeePerGas,
+        maxPriorityFeePerGas,
+      }),
     );
   });
 });
@@ -114,7 +134,7 @@ describe("ERC-20 transfer", () => {
 
   beforeEach(() => {
     estimateGas.mockReset().mockResolvedValue(BigInt(60_000));
-    getGasPrice.mockReset().mockResolvedValue(BigInt(10));
+    estimateFeesPerGas.mockReset().mockResolvedValue(FEES);
     sendTransaction.mockReset().mockResolvedValue(`0x${"b".repeat(64)}`);
     walletClientFactory.mockReset().mockReturnValue({ sendTransaction });
   });
@@ -156,19 +176,22 @@ describe("ERC-20 transfer", () => {
     expect(estimateGas).toHaveBeenCalledWith(
       expect.objectContaining({ to: token, data }),
     );
-    expect(getGasPrice).toHaveBeenCalledOnce();
-    expect(sendTransaction).toHaveBeenCalledWith(
+    expect(estimateFeesPerGas).toHaveBeenCalledOnce();
+    const sent = sendTransaction.mock.calls[0]?.[0];
+    expect(sent).toEqual(
       expect.objectContaining({
         to: token,
         data,
         value: BigInt(0),
         gas: BigInt(60_000),
-        gasPrice: BigInt(10),
+        maxFeePerGas: FEES.maxFeePerGas,
+        maxPriorityFeePerGas: FEES.maxPriorityFeePerGas,
       }),
     );
+    expect(sent).not.toHaveProperty("gasPrice");
   });
 
-  it("reuses reviewed gas parameters without re-estimating", async () => {
+  it("reuses reviewed fee parameters without re-estimating", async () => {
     await sendErc20Transfer({
       token,
       to: recipient,
@@ -176,22 +199,24 @@ describe("ERC-20 transfer", () => {
       chainId: SEPOLIA,
       privateKey,
       gas: BigInt(65_000),
-      gasPrice: BigInt(12),
+      maxFeePerGas: BigInt(12),
+      maxPriorityFeePerGas: BigInt(1),
     });
 
     expect(estimateGas).not.toHaveBeenCalled();
-    expect(getGasPrice).not.toHaveBeenCalled();
+    expect(estimateFeesPerGas).not.toHaveBeenCalled();
     expect(sendTransaction).toHaveBeenCalledWith(
       expect.objectContaining({
         to: token,
         value: BigInt(0),
         gas: BigInt(65_000),
-        gasPrice: BigInt(12),
+        maxFeePerGas: BigInt(12),
+        maxPriorityFeePerGas: BigInt(1),
       }),
     );
   });
 
-  it("returns the gas and fee estimate for an ERC-20 transfer", async () => {
+  it("returns the EIP-1559 estimate for an ERC-20 transfer", async () => {
     await expect(
       estimateErc20Transfer({
         from: recipient,
@@ -202,9 +227,101 @@ describe("ERC-20 transfer", () => {
       }),
     ).resolves.toEqual({
       gas: BigInt(60_000),
-      gasPrice: BigInt(10),
-      estimatedFee: BigInt(600_000),
+      maxFeePerGas: FEES.maxFeePerGas,
+      maxPriorityFeePerGas: FEES.maxPriorityFeePerGas,
+      maxTotalFee: BigInt(1_200_000),
     });
+  });
+});
+
+describe("fee policy", () => {
+  const to = "0x0000000000000000000000000000000000000001";
+  const privateKey = `0x${"1".repeat(64)}` as `0x${string}`;
+
+  beforeEach(() => {
+    estimateGas.mockReset().mockResolvedValue(BigInt(21_000));
+    estimateFeesPerGas.mockReset().mockResolvedValue(FEES);
+    sendTransaction.mockReset().mockResolvedValue(`0x${"a".repeat(64)}`);
+    walletClientFactory.mockReset().mockReturnValue({ sendTransaction });
+  });
+
+  it("rejects a provider proposal above the max-fee cap", async () => {
+    estimateFeesPerGas.mockResolvedValueOnce({
+      maxFeePerGas: MAX_FEE_PER_GAS + BigInt(1),
+      maxPriorityFeePerGas: BigInt(1),
+    });
+
+    await expect(
+      estimateNativeTransfer({ from: to, to, value: BigInt(1), chainId: SEPOLIA }),
+    ).rejects.toThrow("maximum fee per gas is unusually high");
+  });
+
+  it("rejects a total above the total-fee cap", async () => {
+    estimateGas.mockResolvedValueOnce(MAX_GAS_LIMIT);
+    estimateFeesPerGas.mockResolvedValueOnce({
+      maxFeePerGas: MAX_FEE_PER_GAS,
+      maxPriorityFeePerGas: BigInt(1),
+    });
+
+    await expect(
+      estimateNativeTransfer({ from: to, to, value: BigInt(1), chainId: SEPOLIA }),
+    ).rejects.toThrow("maximum network fee is unusually high");
+  });
+
+  it("rejects reviewed values above the cap before signing", async () => {
+    const error = await sendNativeTransfer({
+      to,
+      value: BigInt(1),
+      chainId: SEPOLIA,
+      privateKey,
+      gas: BigInt(21_000),
+      maxFeePerGas: MAX_FEE_PER_GAS + BigInt(1),
+      maxPriorityFeePerGas: BigInt(1),
+    }).catch((caught: unknown) => caught);
+
+    expect((error as Error).message).toBe(
+      "The proposed maximum fee per gas is unusually high. Try again later.",
+    );
+    expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects a partially reviewed fee instead of re-estimating", async () => {
+    const error = await sendNativeTransfer({
+      to,
+      value: BigInt(1),
+      chainId: SEPOLIA,
+      privateKey,
+      gas: BigInt(21_000),
+    }).catch((caught: unknown) => caught);
+
+    expect((error as Error).message).toBe(
+      "The reviewed fee is incomplete. Estimate the transfer again.",
+    );
+    expect(estimateGas).not.toHaveBeenCalled();
+    expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects a priority fee above the max fee", async () => {
+    await expect(
+      sendNativeTransfer({
+        to,
+        value: BigInt(1),
+        chainId: SEPOLIA,
+        privateKey,
+        gas: BigInt(21_000),
+        maxFeePerGas: BigInt(10),
+        maxPriorityFeePerGas: BigInt(11),
+      }),
+    ).rejects.toThrow("priority fee cannot exceed");
+    expect(sendTransaction).not.toHaveBeenCalled();
+  });
+
+  it("rejects a network without EIP-1559 fee data", async () => {
+    estimateFeesPerGas.mockResolvedValueOnce({ gasPrice: BigInt(10) });
+
+    await expect(
+      estimateNativeTransfer({ from: to, to, value: BigInt(1), chainId: SEPOLIA }),
+    ).rejects.toThrow("did not return EIP-1559 fees");
   });
 });
 
@@ -221,7 +338,7 @@ describe("provider error sanitation", () => {
 
   beforeEach(() => {
     estimateGas.mockReset().mockResolvedValue(BigInt(21_000));
-    getGasPrice.mockReset().mockResolvedValue(BigInt(10));
+    estimateFeesPerGas.mockReset().mockResolvedValue(FEES);
     sendTransaction.mockReset();
     walletClientFactory.mockReset().mockReturnValue({ sendTransaction });
   });
@@ -241,6 +358,16 @@ describe("provider error sanitation", () => {
     );
     expect((error as Error).message).not.toContain("provider detail");
     expect((error as Error).cause).toBeInstanceOf(Error);
+  });
+
+  it("maps unsupported EIP-1559 fees to fixed local text", async () => {
+    estimateFeesPerGas.mockRejectedValueOnce(
+      named("Eip1559FeesNotSupportedError"),
+    );
+
+    await expect(
+      estimateNativeTransfer({ from: to, to, value: BigInt(1), chainId: SEPOLIA }),
+    ).rejects.toThrow("This network does not support EIP-1559 fees.");
   });
 
   it("does not reflect a send failure and keeps the original cause", async () => {

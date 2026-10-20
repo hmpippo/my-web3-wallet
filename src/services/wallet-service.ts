@@ -153,7 +153,8 @@ export interface WalletServiceDependencies {
     chainId: number;
     privateKey: Hex;
     gas?: bigint;
-    gasPrice?: bigint;
+    maxFeePerGas?: bigint;
+    maxPriorityFeePerGas?: bigint;
   }) => Promise<Hash>;
   sendTokenTransfer?: (params: {
     token: Address;
@@ -162,7 +163,8 @@ export interface WalletServiceDependencies {
     chainId: number;
     privateKey: Hex;
     gas?: bigint;
-    gasPrice?: bigint;
+    maxFeePerGas?: bigint;
+    maxPriorityFeePerGas?: bigint;
   }) => Promise<Hash>;
   /** Reads the EIP-7702 delegate address for an account, if any. */
   readDelegatedAddress?: (
@@ -1433,7 +1435,8 @@ export class WalletService {
       value: tx.value,
       chainId: tx.chainId,
       gas: tx.estimate?.gas,
-      gasPrice: tx.estimate?.gasPrice,
+      maxFeePerGas: tx.estimate?.maxFeePerGas,
+      maxPriorityFeePerGas: tx.estimate?.maxPriorityFeePerGas,
       // Hex is required at the signing boundary; the long-lived copy is bytes.
       privateKey: bytesToSecret(privateKey),
     });
@@ -1481,7 +1484,8 @@ export class WalletService {
       amount: tx.amount,
       chainId: tx.chainId,
       gas: tx.estimate?.gas,
-      gasPrice: tx.estimate?.gasPrice,
+      maxFeePerGas: tx.estimate?.maxFeePerGas,
+      maxPriorityFeePerGas: tx.estimate?.maxPriorityFeePerGas,
       privateKey: bytesToSecret(privateKey),
     });
   }

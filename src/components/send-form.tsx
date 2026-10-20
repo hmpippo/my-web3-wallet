@@ -11,6 +11,7 @@ import {
   type FormEvent,
 } from "react";
 import {
+  formatGwei,
   formatUnits,
   getAddress,
   isAddress,
@@ -19,6 +20,7 @@ import {
   type Hash,
 } from "viem";
 import { getExplorerTxUrl } from "@/core/chain";
+import { isUnusuallyHighFee } from "@/core/fees";
 import type { StoredWalletToken } from "@/core/storage";
 import { useActiveChain } from "@/lib/use-active-chain";
 import { CopyButton } from "@/components/copy-button";
@@ -226,7 +228,7 @@ export function SendForm() {
         <h1>Send</h1>
         <p>
           Send {native.symbol} or any ERC-20 token you have added to this account
-          on {chain.name}. Check the recipient and estimated network fee before
+          on {chain.name}. Check the recipient and the maximum network fee before
           confirming.
         </p>
       </section>
@@ -349,18 +351,32 @@ export function SendForm() {
                 </div>
               ) : null}
               <div>
-                <dt>Estimated network fee</dt>
+                <dt>Gas limit</dt>
+                <dd>{review.estimate.gas.toString()}</dd>
+              </div>
+              <div>
+                <dt>Max fee per gas</dt>
+                <dd>{formatGwei(review.estimate.maxFeePerGas)} gwei</dd>
+              </div>
+              <div>
+                <dt>Priority fee</dt>
                 <dd>
-                  {formatUnits(review.estimate.estimatedFee, native.decimals)}{" "}
+                  {formatGwei(review.estimate.maxPriorityFeePerGas)} gwei
+                </dd>
+              </div>
+              <div>
+                <dt>Maximum network fee</dt>
+                <dd>
+                  {formatUnits(review.estimate.maxTotalFee, native.decimals)}{" "}
                   {native.symbol}
                 </dd>
               </div>
               {!review.token ? (
                 <div>
-                  <dt>Estimated total</dt>
+                  <dt>Maximum total</dt>
                   <dd>
                     {formatUnits(
-                      review.value + review.estimate.estimatedFee,
+                      review.value + review.estimate.maxTotalFee,
                       native.decimals,
                     )}{" "}
                     {native.symbol}
@@ -368,6 +384,16 @@ export function SendForm() {
                 </div>
               ) : null}
             </dl>
+            <p className="field-help">
+              You may pay less than the maximum. The maximum is charged only if
+              the base fee rises to the limit shown.
+            </p>
+            {isUnusuallyHighFee(review.estimate) ? (
+              <p className="fee-warning" role="status">
+                <strong>Unusually high network fee.</strong> Check the fee
+                breakdown before confirming.
+              </p>
+            ) : null}
             <div className="form-actions">
               <button
                 className="button button-primary"

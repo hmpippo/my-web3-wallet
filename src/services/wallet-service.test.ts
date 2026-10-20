@@ -291,8 +291,9 @@ describe("WalletService", () => {
     };
     const estimate = {
       gas: BigInt(21_000),
-      gasPrice: BigInt(10),
-      estimatedFee: BigInt(210_000),
+      maxFeePerGas: BigInt(20),
+      maxPriorityFeePerGas: BigInt(2),
+      maxTotalFee: BigInt(420_000),
     };
 
     await expect(service.signAndSendTransaction(transaction)).rejects.toThrow(
@@ -309,7 +310,8 @@ describe("WalletService", () => {
       value: transaction.value,
       chainId: SEPOLIA,
       gas: estimate.gas,
-      gasPrice: estimate.gasPrice,
+      maxFeePerGas: estimate.maxFeePerGas,
+      maxPriorityFeePerGas: estimate.maxPriorityFeePerGas,
       privateKey: expect.stringMatching(/^0x[0-9a-f]{64}$/),
     });
 
@@ -426,7 +428,8 @@ describe("WalletService", () => {
       value: transaction.value,
       chainId: SEPOLIA,
       gas: undefined,
-      gasPrice: undefined,
+      maxFeePerGas: undefined,
+      maxPriorityFeePerGas: undefined,
       privateKey: expectedPrivateKey,
     });
 
@@ -463,8 +466,9 @@ describe("WalletService", () => {
     };
     const estimate = {
       gas: BigInt(60_000),
-      gasPrice: BigInt(10),
-      estimatedFee: BigInt(600_000),
+      maxFeePerGas: BigInt(20),
+      maxPriorityFeePerGas: BigInt(2),
+      maxTotalFee: BigInt(1_200_000),
     };
 
     await expect(service.signAndSendTokenTransfer(transfer)).rejects.toThrow(
@@ -488,7 +492,8 @@ describe("WalletService", () => {
       amount: transfer.amount,
       chainId: SEPOLIA,
       gas: estimate.gas,
-      gasPrice: estimate.gasPrice,
+      maxFeePerGas: estimate.maxFeePerGas,
+      maxPriorityFeePerGas: estimate.maxPriorityFeePerGas,
       privateKey: expect.stringMatching(/^0x[0-9a-f]{64}$/),
     });
 

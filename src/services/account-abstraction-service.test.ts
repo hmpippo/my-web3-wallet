@@ -1,15 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { getCode, signAuthorization, sendTransaction, walletClientFactory } =
-  vi.hoisted(() => ({
-    getCode: vi.fn(),
-    signAuthorization: vi.fn(),
-    sendTransaction: vi.fn(),
-    walletClientFactory: vi.fn(),
-  }));
+const {
+  getCode,
+  estimateGas,
+  estimateFeesPerGas,
+  signAuthorization,
+  sendTransaction,
+  walletClientFactory,
+} = vi.hoisted(() => ({
+  getCode: vi.fn(),
+  estimateGas: vi.fn(),
+  estimateFeesPerGas: vi.fn(),
+  signAuthorization: vi.fn(),
+  sendTransaction: vi.fn(),
+  walletClientFactory: vi.fn(),
+}));
 
 vi.mock("@/core/chain", () => ({
-  getPublicClient: () => ({ getCode }),
+  getPublicClient: () => ({ getCode, estimateGas, estimateFeesPerGas }),
   getChain: () => ({ id: 11155111 }),
   getRpcUrl: () => "https://rpc.test",
 }));
@@ -24,6 +32,7 @@ vi.mock("viem", async (importOriginal) => {
 });
 
 import { zeroAddress } from "viem";
+import { MAX_FEE_PER_GAS } from "@/core/fees";
 import {
   parseDelegation,
   readDelegatedAddress,
@@ -95,6 +104,11 @@ describe("revokeDelegation", () => {
   const privateKey = `0x${"1".repeat(64)}` as const;
 
   beforeEach(() => {
+    estimateGas.mockReset().mockResolvedValue(BigInt(50_000));
+    estimateFeesPerGas.mockReset().mockResolvedValue({
+      maxFeePerGas: BigInt(20),
+      maxPriorityFeePerGas: BigInt(2),
+    });
     signAuthorization.mockReset().mockResolvedValue({
       address: "0x0000000000000000000000000000000000000000",
       chainId: SEPOLIA,
@@ -120,7 +134,7 @@ describe("revokeDelegation", () => {
         executor: "self",
       }),
     );
-    expect(sendTransaction).toHaveBeenCalledWith(
+    expect(estimateGas).toHaveBeenCalledWith(
       expect.objectContaining({
         to: ACCOUNT,
         data: "0x",
@@ -130,6 +144,31 @@ describe("revokeDelegation", () => {
         ],
       }),
     );
+    expect(sendTransaction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: ACCOUNT,
+        data: "0x",
+        value: BigInt(0),
+        gas: BigInt(50_000),
+        maxFeePerGas: BigInt(20),
+        maxPriorityFeePerGas: BigInt(2),
+        authorizationList: [
+          expect.objectContaining({ address: zeroAddress }),
+        ],
+      }),
+    );
+  });
+
+  it("refuses an over-cap fee before broadcasting the revoke", async () => {
+    estimateFeesPerGas.mockResolvedValueOnce({
+      maxFeePerGas: MAX_FEE_PER_GAS + BigInt(1),
+      maxPriorityFeePerGas: BigInt(1),
+    });
+
+    await expect(
+      revokeDelegation({ address: ACCOUNT, chainId: SEPOLIA, privateKey }),
+    ).rejects.toThrow("maximum fee per gas is unusually high");
+    expect(sendTransaction).not.toHaveBeenCalled();
   });
 
   it("does not reflect a revoke failure and keeps the cause", async () => {

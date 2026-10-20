@@ -2,6 +2,7 @@ import { createWalletClient, getAddress, http, zeroAddress } from "viem";
 import type { Address, Hash, Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { getChain, getPublicClient, getRpcUrl } from "@/core/chain";
+import { NetworkFeeError, validateNetworkFee } from "@/core/fees";
 import {
   errorNameInChain,
   fixedError,
@@ -74,11 +75,39 @@ export async function revokeDelegation({
     transport: http(getRpcUrl(chainId)),
   });
 
+  const publicClient = getPublicClient(chainId);
   try {
     const authorization = await walletClient.signAuthorization({
       account,
       contractAddress: zeroAddress,
       executor: "self",
+    });
+
+    // The authorization must be signed before gas can be estimated: a type-4
+    // transaction with an empty authorization list has a different cost.
+    const [gas, fees] = await Promise.all([
+      publicClient.estimateGas({
+        account: account.address,
+        authorizationList: [authorization],
+        to: address,
+        data: "0x",
+        value: BigInt(0),
+      }),
+      publicClient.estimateFeesPerGas(),
+    ]);
+
+    if (
+      typeof fees.maxFeePerGas !== "bigint" ||
+      typeof fees.maxPriorityFeePerGas !== "bigint"
+    ) {
+      throw new NetworkFeeError(
+        "This network did not return EIP-1559 fees. Try again later.",
+      );
+    }
+    validateNetworkFee({
+      gas,
+      maxFeePerGas: fees.maxFeePerGas,
+      maxPriorityFeePerGas: fees.maxPriorityFeePerGas,
     });
 
     return await walletClient.sendTransaction({
@@ -87,13 +116,23 @@ export async function revokeDelegation({
       to: address,
       data: "0x",
       value: BigInt(0),
+      gas,
+      maxFeePerGas: fees.maxFeePerGas,
+      maxPriorityFeePerGas: fees.maxPriorityFeePerGas,
     });
   } catch (error) {
+    if (error instanceof NetworkFeeError) throw error;
     if (errorNameInChain(error, ["InsufficientFundsError"])) {
       throw fixedError(INSUFFICIENT_FUNDS_MESSAGE, error);
     }
     if (errorNameInChain(error, ["TimeoutError", "HttpRequestError"])) {
       throw fixedError(NETWORK_TIMEOUT_MESSAGE, error);
+    }
+    if (errorNameInChain(error, ["Eip1559FeesNotSupportedError"])) {
+      throw fixedError(
+        "This network does not support EIP-1559 fees.",
+        error,
+      );
     }
     throw fixedError(
       "Could not revoke the delegation. Check the network and try again.",

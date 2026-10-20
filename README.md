@@ -30,10 +30,11 @@ Open [http://localhost:3000](http://localhost:3000) to view the app.
 - `src/core/biometric-vault.ts` — HKDF and AES-GCM wrapping of the recovery phrase under a passkey
 - `src/core/storage.ts` — encrypted vault, biometric unlock vault, and public account metadata storage
 - `src/core/chain.ts` — supported-chain registry, per-chain RPC resolution, and cached viem public clients
+- `src/core/fees.ts` — EIP-1559 fee validation, hard caps, and high-fee warning thresholds
 - `src/services/chain-service.ts` — persisted active-chain store for the network switcher
 - `src/services/theme-service.ts` — persisted light/dark/system theme store
 - `src/services/wallet-service.ts` — create, import, unlock (password or biometric), lock, and send lifecycle
-- `src/services/transaction-service.ts` — estimated-gas native transfers with viem
+- `src/services/transaction-service.ts` — EIP-1559 fee-capped native and token transfers with viem
 - `src/services/balance-service.ts` — native balance reads for the active chain
 - `src/services/token-service.ts` — ERC-20 metadata and balance reads from the active chain's RPC
 - `src/services/nft-service.ts` — ERC-721/ERC-1155 metadata URI and public metadata reads
@@ -51,8 +52,9 @@ Open [http://localhost:3000](http://localhost:3000) to view the app.
 Wallet creation displays a recovery phrase before asking the user to confirm
 its backup and set a password. The vault is not persisted before confirmation.
 Import and unlock are local operations. Locking clears the service's in-memory
-derived keys and account state, including on page unload. Native transfers
-show an estimated fee before confirmation. The browser UI is still a
+derived keys and account state, including on page unload. Native and token
+transfers show the EIP-1559 gas limit, max fee per gas, priority fee, and
+maximum network fee before confirmation. The browser UI is still a
 self-custody wallet MVP: testnets hold worthless funds, mainnets move real
 assets, and you should never enter a recovery phrase used for real funds.
 
@@ -164,6 +166,14 @@ Tokens and NFTs are stored per account and tagged with their chain. Entries
 saved before multi-chain support (which had no chain) are treated as Sepolia.
 Switching chains filters the portfolio, balances, and activity feed to that
 network, and the send form only offers assets tracked on the active chain.
+
+Transfers are priced with EIP-1559 `maxFeePerGas` and `maxPriorityFeePerGas`
+from the active RPC. The wallet refuses to sign when the gas limit exceeds
+1,000,000, the max fee exceeds 1,000 gwei, the priority fee exceeds 50 gwei, or
+the maximum total fee exceeds 0.1 native token. The review warns above 100 gwei
+or 0.01 native. The RPC still chooses the base-fee proposal and gas estimate
+within those bounds, and OP/Base L1 data fees are charged in addition to the
+displayed execution fee.
 
 ## Appearance
 
