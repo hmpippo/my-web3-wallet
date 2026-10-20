@@ -10,6 +10,7 @@ import {
 } from "react";
 import { walletService } from "@/services/wallet-service";
 import { PasswordInput } from "@/components/password-input";
+import { UnlockThrottledError } from "@/lib/unlock-throttle";
 
 export function UnlockWalletForm() {
   const router = useRouter();
@@ -40,6 +41,12 @@ export function UnlockWalletForm() {
   const [error, setError] = useState<string | null>(null);
   const [biometricLabel, setBiometricLabel] = useState<string | null>(null);
   const [isRegistryLoaded, setIsRegistryLoaded] = useState(false);
+  // Absolute end of the failed-attempt cooldown plus the last computed
+  // remainder. Deriving the label from a timestamp keeps it correct when the
+  // tab throttles timers; the remainder is state because render must be pure.
+  const [cooldownUntil, setCooldownUntil] = useState<number | null>(null);
+  const [cooldownRemainingMs, setCooldownRemainingMs] = useState(0);
+  const cooldownSeconds = Math.ceil(cooldownRemainingMs / 1000);
   // The router can keep this page mounted while the wallet is open, so the
   // notice cannot be captured once on mount. Track the lock reason instead.
   const [lockNotice, setLockNotice] = useState<string | null>(null);
@@ -62,12 +69,39 @@ export function UnlockWalletForm() {
       .refreshWallets()
       .catch(() => undefined)
       .finally(() => {
-        if (active) setIsRegistryLoaded(true);
+        if (!active) return;
+        setIsRegistryLoaded(true);
+        // A reload during a cooldown should restore the countdown, not offer
+        // a button that the service will refuse anyway.
+        const remaining = walletService.getUnlockCooldownRemainingMs();
+        if (remaining > 0) {
+          setCooldownUntil(Date.now() + remaining);
+          setCooldownRemainingMs(remaining);
+        }
       });
     return () => {
       active = false;
     };
   }, []);
+
+  // Re-render twice a second while blocked and re-enable the button when the
+  // deadline passes. Uses wall-clock time so a throttled tab self-corrects.
+  useEffect(() => {
+    if (cooldownUntil === null) return;
+    const tick = () => {
+      const remaining = cooldownUntil - Date.now();
+      if (remaining <= 0) {
+        setCooldownUntil(null);
+        setCooldownRemainingMs(0);
+        setError(null);
+      } else {
+        setCooldownRemainingMs(remaining);
+      }
+    };
+    tick();
+    const timer = setInterval(tick, 500);
+    return () => clearInterval(timer);
+  }, [cooldownUntil]);
 
   // Once the registry has loaded, a device with no wallets has nothing to
   // unlock: send the user back to the manager.
@@ -107,6 +141,10 @@ export function UnlockWalletForm() {
     setBiometricLabel(null);
     try {
       await walletService.selectWallet(walletId);
+      // The cooldown is per wallet; do not inherit the previous one.
+      const remaining = walletService.getUnlockCooldownRemainingMs();
+      setCooldownUntil(remaining > 0 ? Date.now() + remaining : null);
+      setCooldownRemainingMs(remaining);
     } catch (caught) {
       setError(
         caught instanceof Error ? caught.message : "Could not switch wallets.",
@@ -133,6 +171,8 @@ export function UnlockWalletForm() {
 
   async function unlock(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    // Enter can submit the form even when the button is disabled.
+    if (cooldownUntil !== null && Date.now() < cooldownUntil) return;
     setError(null);
     setIsBusy(true);
     try {
@@ -140,11 +180,17 @@ export function UnlockWalletForm() {
       setPassword("");
       router.replace("/wallet");
     } catch (caught) {
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : "Wallet unlock failed. Please try again.",
-      );
+      if (caught instanceof UnlockThrottledError) {
+        setCooldownUntil(Date.now() + caught.retryAfterMs);
+        setCooldownRemainingMs(caught.retryAfterMs);
+        setError(null);
+      } else {
+        setError(
+          caught instanceof Error
+            ? caught.message
+            : "Wallet unlock failed. Please try again.",
+        );
+      }
     } finally {
       setIsBusy(false);
     }
@@ -226,17 +272,26 @@ export function UnlockWalletForm() {
         <div className="form-actions">
           <button
             className="button button-primary"
-            disabled={isBusy}
+            disabled={isBusy || cooldownUntil !== null}
             type="submit"
           >
-            {isBusy ? "Unlocking..." : "Unlock"}
+            {isBusy
+              ? "Unlocking..."
+              : cooldownUntil !== null
+                ? `Try again in ${cooldownSeconds}s`
+                : "Unlock"}
           </button>
           <Link className="text-link" href="/">
             Back
           </Link>
         </div>
       </form>
-      {error && (
+      {cooldownUntil !== null ? (
+        <p className="form-error" role="alert">
+          Too many attempts. Wait for the cooldown to finish.
+        </p>
+      ) : null}
+      {cooldownUntil === null && error && (
         <p className="form-error" role="alert">
           {error}
         </p>

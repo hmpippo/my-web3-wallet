@@ -1643,19 +1643,49 @@ describe("wallet service session locking", () => {
     expect(service.getAddress()).toBe(EXPECTED_ADDRESS);
   });
 
-  it("blocks the fourth attempt after three wrong passwords", async () => {
+  it("reports the cooldown on the third wrong password", async () => {
     const service = new WalletService({ storage: createStorage().storage });
     await service.importWallet(TEST_MNEMONIC, "correct horse battery");
+    expect(service.getUnlockCooldownRemainingMs()).toBe(0);
 
-    for (let attempt = 0; attempt < 3; attempt += 1) {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
       await expect(service.unlock("wrong password")).rejects.toBeInstanceOf(
         VaultDecryptionError,
       );
+      expect(service.getUnlockCooldownRemainingMs()).toBe(0);
     }
 
+    // The attempt that starts the cooldown says so immediately.
+    await expect(service.unlock("wrong password")).rejects.toThrow(
+      "Too many attempts. Try again in 30s.",
+    );
+    expect(service.getUnlockCooldownRemainingMs()).toBeGreaterThan(0);
+
+    // Later attempts are refused by the pre-check, even with the right password.
     await expect(
       service.unlock("correct horse battery"),
     ).rejects.toBeInstanceOf(UnlockThrottledError);
     expect(service.getState()).toMatchObject(LOCKED_STATE);
+  });
+
+  it("reads the cooldown for the selected wallet only", async () => {
+    const throttle = {
+      retryAfterMs: vi.fn((walletId: string) =>
+        walletId === DEFAULT_WALLET_ID ? 5_000 : 0,
+      ),
+      recordFailure: vi.fn(),
+      recordSuccess: vi.fn(),
+    };
+    const service = new WalletService({
+      storage: createStorage(null, null, null, seedRegistry()).storage,
+      unlockThrottle: throttle,
+    });
+
+    // No registry loaded yet: nothing to report.
+    expect(service.getUnlockCooldownRemainingMs()).toBe(0);
+
+    await service.refreshWallets();
+    expect(service.getUnlockCooldownRemainingMs()).toBe(5_000);
+    expect(throttle.retryAfterMs).toHaveBeenCalledWith(DEFAULT_WALLET_ID);
   });
 });

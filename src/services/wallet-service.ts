@@ -490,6 +490,9 @@ export class WalletService {
     } catch (error) {
       if (error instanceof VaultDecryptionError) {
         this.unlockThrottle.recordFailure(walletId);
+        // Surface the cooldown on the attempt that starts it, not one later.
+        const remaining = this.unlockThrottle.retryAfterMs(walletId);
+        if (remaining > 0) throw new UnlockThrottledError(remaining);
       }
       throw error;
     }
@@ -612,6 +615,15 @@ export class WalletService {
   /** Why the last session ended, so the unlock screen can explain an auto-lock. */
   getLockReason(): LockReason | null {
     return this.lastLockReason;
+  }
+
+  /**
+   * Milliseconds until the selected wallet accepts another password attempt.
+   * Used to restore the countdown after a reload; 0 means attempts are allowed.
+   */
+  getUnlockCooldownRemainingMs(): number {
+    const walletId = this.registryLoaded ? this.registry.selectedId : null;
+    return walletId ? this.unlockThrottle.retryAfterMs(walletId) : 0;
   }
 
   /** Whether a wrapped biometric vault exists for the selected wallet. */
