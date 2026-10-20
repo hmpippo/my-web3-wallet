@@ -135,7 +135,7 @@ secure context, expose a user-verifying platform authenticator, and return a PRF
 result. If any of those fail, the option is hidden and nothing is stored.
 Biometric unlock is per device. The passkey itself may sync through the OS
 provider (iCloud Keychain on Apple devices, Google Password Manager elsewhere),
-but the encrypted vault stays in local storage, so a new device needs one
+but the encrypted vault stays in this browser's IndexedDB, so a new device needs one
 password unlock before biometric unlock can be enabled there. Turning it off
 removes the local wrapped vault; the passkey is removed from the OS keychain by
 the user. The Touch ID / Face ID ceremony cannot be automated in tests and

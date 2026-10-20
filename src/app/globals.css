@@ -686,6 +686,66 @@ input {
   margin: 1rem 0 0;
 }
 
+.form-notice {
+  margin: 0;
+  border: 1px solid var(--warning-line);
+  border-radius: 0.65rem;
+  background: var(--warning-bg);
+  color: var(--warning-strong);
+  padding: 0.7rem 0.9rem;
+  font-size: 0.83rem;
+  line-height: 1.5;
+}
+
+.password-strength {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.45rem;
+}
+
+.password-strength-track {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.25rem;
+}
+
+.password-strength-track span {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--line);
+}
+
+.password-strength[data-strength="weak"]
+  .password-strength-track
+  span[data-active="true"] {
+  background: var(--danger);
+}
+
+.password-strength[data-strength="fair"]
+  .password-strength-track
+  span[data-active="true"] {
+  background: var(--status-amber);
+}
+
+.password-strength[data-strength="strong"]
+  .password-strength-track
+  span[data-active="true"] {
+  background: var(--status-green);
+}
+
+.password-strength-copy {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.password-strength-copy strong {
+  color: var(--foreground);
+  font-weight: 600;
+}
+
 .dashboard-heading {
   display: flex;
   align-items: center;

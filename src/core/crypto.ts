@@ -1,4 +1,5 @@
 import { decodeBase64, encodeBase64 } from "@/lib/base64";
+import { MIN_PASSWORD_LENGTH } from "./password";
 
 const VAULT_VERSION = 1 as const;
 const PBKDF2_ITERATIONS = 600_000;
@@ -6,7 +7,6 @@ const SALT_LENGTH = 16;
 const IV_LENGTH = 12;
 const AES_KEY_LENGTH = 256;
 const AES_TAG_LENGTH = 128;
-const MIN_PASSWORD_LENGTH = 8;
 
 export interface EncryptedVault {
   version: typeof VAULT_VERSION;

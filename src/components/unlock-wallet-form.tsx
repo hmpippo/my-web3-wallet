@@ -40,6 +40,20 @@ export function UnlockWalletForm() {
   const [error, setError] = useState<string | null>(null);
   const [biometricLabel, setBiometricLabel] = useState<string | null>(null);
   const [isRegistryLoaded, setIsRegistryLoaded] = useState(false);
+  // The router can keep this page mounted while the wallet is open, so the
+  // notice cannot be captured once on mount. Track the lock reason instead.
+  const [lockNotice, setLockNotice] = useState<string | null>(null);
+  useEffect(() => {
+    const updateLockNotice = () => {
+      setLockNotice(
+        walletService.getLockReason() === "inactivity"
+          ? "Locked after 30 seconds of inactivity."
+          : null,
+      );
+    };
+    updateLockNotice();
+    return walletService.subscribe(updateLockNotice);
+  }, []);
 
   // Load the registry. It is public metadata, so it can be read while locked.
   useEffect(() => {
@@ -145,6 +159,12 @@ export function UnlockWalletForm() {
       <p className="muted-copy">
         Enter the password you chose for this wallet on this device.
       </p>
+
+      {lockNotice ? (
+        <p className="form-notice" role="status">
+          {lockNotice}
+        </p>
+      ) : null}
 
       {wallets.length > 1 ? (
         <div className="account-controls">

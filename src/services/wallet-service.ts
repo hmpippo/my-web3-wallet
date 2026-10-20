@@ -3,7 +3,11 @@ import type {
   Erc20TransferEstimate,
   NativeTransferEstimate,
 } from "./transaction-service";
-import { decryptVault, encryptVault } from "@/core/crypto";
+import {
+  decryptVault,
+  encryptVault,
+  VaultDecryptionError,
+} from "@/core/crypto";
 import {
   deriveAccountAtIndex,
   generateMnemonic,
@@ -38,6 +42,11 @@ import {
   registerBiometricCredential,
 } from "@/core/webauthn";
 import { decodeBase64 } from "@/lib/base64";
+import {
+  createUnlockThrottle,
+  UnlockThrottledError,
+  type UnlockThrottle,
+} from "@/lib/unlock-throttle";
 import { sendErc20Transfer, sendNativeTransfer } from "./transaction-service";
 import {
   readDelegatedAddress as defaultReadDelegatedAddress,
@@ -106,9 +115,14 @@ const defaultBiometricProvider: BiometricUnlockProvider = {
     typeof window === "undefined" ? null : window.location.hostname,
 };
 
+/** Why the session ended; drives the unlock-screen notice. */
+export type LockReason = "manual" | "inactivity";
+
 export interface WalletServiceDependencies {
   storage?: StorageService;
   biometric?: BiometricUnlockProvider;
+  /** Failed-unlock throttle; injectable so tests can control the cooldown. */
+  unlockThrottle?: UnlockThrottle;
   readTokenMetadata?: (
     address: Address,
     chainId: number,
@@ -216,9 +230,13 @@ export class WalletService {
     WalletServiceDependencies["revokeDelegation"]
   >;
   private readonly biometric: BiometricUnlockProvider;
+  private readonly unlockThrottle: UnlockThrottle;
+  private lastLockReason: LockReason | null = null;
 
   constructor(dependencies: WalletServiceDependencies = {}) {
     this.storage = dependencies.storage ?? storageService;
+    this.unlockThrottle =
+      dependencies.unlockThrottle ?? createUnlockThrottle();
     this.sendTransfer = dependencies.sendTransfer ?? sendNativeTransfer;
     this.sendTokenTransfer =
       dependencies.sendTokenTransfer ?? sendErc20Transfer;
@@ -461,7 +479,22 @@ export class WalletService {
       throw new Error("No wallet is stored on this device");
     }
 
-    const payload = await decryptVault(vault, password);
+    const retryAfterMs = this.unlockThrottle.retryAfterMs(walletId);
+    if (retryAfterMs > 0) {
+      throw new UnlockThrottledError(retryAfterMs);
+    }
+
+    let payload: string;
+    try {
+      payload = await decryptVault(vault, password);
+    } catch (error) {
+      if (error instanceof VaultDecryptionError) {
+        this.unlockThrottle.recordFailure(walletId);
+      }
+      throw error;
+    }
+    this.unlockThrottle.recordSuccess(walletId);
+
     this.assertOperationCurrent(operationVersion);
     const secret = parseVaultSecret(payload);
     if (secret.kind === "privateKey") {
@@ -562,7 +595,8 @@ export class WalletService {
     }
   }
 
-  lock(): void {
+  lock(reason: LockReason = "manual"): void {
+    this.lastLockReason = reason === "inactivity" ? "inactivity" : null;
     this.operationVersion += 1;
     this.accountMutationVersion += 1;
     this.accountMutationInProgress = false;
@@ -573,6 +607,11 @@ export class WalletService {
     this.updateState(false, [], null);
     this.pendingWallet?.seed.fill(0);
     this.pendingWallet = null;
+  }
+
+  /** Why the last session ended, so the unlock screen can explain an auto-lock. */
+  getLockReason(): LockReason | null {
+    return this.lastLockReason;
   }
 
   /** Whether a wrapped biometric vault exists for the selected wallet. */

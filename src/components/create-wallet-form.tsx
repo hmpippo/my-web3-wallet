@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { walletService } from "@/services/wallet-service";
 import { PasswordInput } from "@/components/password-input";
+import { PasswordStrength } from "@/components/password-strength";
+import { passwordPolicyError } from "@/core/password";
 
 export function CreateWalletForm() {
   const router = useRouter();
@@ -42,6 +44,11 @@ export function CreateWalletForm() {
     event.preventDefault();
     if (password !== passwordConfirmation) {
       setError("Passwords do not match.");
+      return;
+    }
+    const policyError = passwordPolicyError(password);
+    if (policyError) {
+      setError(policyError);
       return;
     }
 
@@ -112,8 +119,12 @@ export function CreateWalletForm() {
               required
               value={password}
             />
-            <span className="field-help">Use at least 8 characters.</span>
+            <span className="field-help">
+              Use at least 8 characters. A longer passphrase is much safer:
+              anyone who obtains the encrypted vault can guess offline.
+            </span>
           </label>
+          <PasswordStrength password={password} />
           <label className="form-field">
             Confirm password
             <PasswordInput

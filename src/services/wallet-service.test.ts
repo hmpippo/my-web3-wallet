@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { encryptVault, type EncryptedVault } from "@/core/crypto";
+import {
+  encryptVault,
+  VaultDecryptionError,
+  type EncryptedVault,
+} from "@/core/crypto";
 import { deriveAccountAtIndex, mnemonicToSeed } from "@/core/hd-wallet";
 import type { BiometricVault } from "@/core/biometric-vault";
 import { decodeBase64 } from "@/lib/base64";
@@ -9,6 +13,7 @@ import type {
   WalletRegistry,
 } from "@/core/storage";
 import { WalletService, type BiometricUnlockProvider } from "./wallet-service";
+import { UnlockThrottledError } from "@/lib/unlock-throttle";
 
 const TEST_MNEMONIC =
   "test test test test test test test test test test test junk";
@@ -1577,5 +1582,80 @@ describe("WalletService private key import", () => {
 
     expect(service.getAddress()).toBe(SECOND_ADDRESS);
     expect(service.getState().accounts[0]?.path).toBe("imported");
+  });
+});
+
+describe("wallet service session locking", () => {
+  it("records an inactivity lock and clears it on a manual lock", () => {
+    const service = new WalletService({ storage: createStorage().storage });
+
+    service.lock("inactivity");
+    expect(service.getLockReason()).toBe("inactivity");
+
+    service.lock();
+    expect(service.getLockReason()).toBeNull();
+  });
+
+  it("refuses to unlock while the throttle is active", async () => {
+    const throttle = {
+      retryAfterMs: vi.fn(() => 30_000),
+      recordFailure: vi.fn(),
+      recordSuccess: vi.fn(),
+    };
+    const service = new WalletService({
+      storage: createStorage().storage,
+      unlockThrottle: throttle,
+    });
+    await service.importWallet(TEST_MNEMONIC, "correct horse battery");
+
+    await expect(
+      service.unlock("correct horse battery"),
+    ).rejects.toBeInstanceOf(UnlockThrottledError);
+    await expect(service.unlock("correct horse battery")).rejects.toThrow(
+      "Too many attempts. Try again in 30s.",
+    );
+
+    expect(throttle.recordFailure).not.toHaveBeenCalled();
+    expect(throttle.recordSuccess).not.toHaveBeenCalled();
+    expect(service.getState()).toMatchObject(LOCKED_STATE);
+  });
+
+  it("counts a wrong password and clears the counter on success", async () => {
+    const throttle = {
+      retryAfterMs: vi.fn(() => 0),
+      recordFailure: vi.fn(),
+      recordSuccess: vi.fn(),
+    };
+    const service = new WalletService({
+      storage: createStorage().storage,
+      unlockThrottle: throttle,
+    });
+    await service.importWallet(TEST_MNEMONIC, "correct horse battery");
+
+    await expect(service.unlock("wrong password")).rejects.toBeInstanceOf(
+      VaultDecryptionError,
+    );
+    expect(throttle.recordFailure).toHaveBeenCalledTimes(1);
+    expect(service.getState()).toMatchObject(LOCKED_STATE);
+
+    await service.unlock("correct horse battery");
+    expect(throttle.recordSuccess).toHaveBeenCalledTimes(1);
+    expect(service.getAddress()).toBe(EXPECTED_ADDRESS);
+  });
+
+  it("blocks the fourth attempt after three wrong passwords", async () => {
+    const service = new WalletService({ storage: createStorage().storage });
+    await service.importWallet(TEST_MNEMONIC, "correct horse battery");
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await expect(service.unlock("wrong password")).rejects.toBeInstanceOf(
+        VaultDecryptionError,
+      );
+    }
+
+    await expect(
+      service.unlock("correct horse battery"),
+    ).rejects.toBeInstanceOf(UnlockThrottledError);
+    expect(service.getState()).toMatchObject(LOCKED_STATE);
   });
 });

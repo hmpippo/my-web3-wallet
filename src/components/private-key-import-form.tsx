@@ -6,6 +6,8 @@ import { useState, type FormEvent } from "react";
 import { walletService } from "@/services/wallet-service";
 import { getErrorMessage } from "@/components/mnemonic-import-form";
 import { PasswordInput } from "@/components/password-input";
+import { PasswordStrength } from "@/components/password-strength";
+import { passwordPolicyError } from "@/core/password";
 
 /**
  * Imports a single private key as its own wallet.
@@ -28,6 +30,11 @@ export function PrivateKeyImportForm() {
     event.preventDefault();
     if (password !== passwordConfirmation) {
       setError("Passwords do not match.");
+      return;
+    }
+    const policyError = passwordPolicyError(password);
+    if (policyError) {
+      setError(policyError);
       return;
     }
 
@@ -85,8 +92,12 @@ export function PrivateKeyImportForm() {
             required
             value={password}
           />
-          <span className="field-help">Use at least 8 characters.</span>
+          <span className="field-help">
+            Use at least 8 characters. A longer passphrase is much safer:
+            anyone who obtains the encrypted vault can guess offline.
+          </span>
         </label>
+        <PasswordStrength password={password} />
         <label className="form-field">
           Confirm password
           <PasswordInput

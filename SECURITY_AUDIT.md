@@ -15,9 +15,9 @@
 
 The cryptographic core is **well built and unusually disciplined**: audited libraries, correct WebCrypto usage, secrets zeroized where the platform allows, and every value read back from storage is re-validated rather than trusted. There are no critical, directly exploitable key-theft bugs in the code.
 
-The exposure is almost entirely *around* the crypto. The design assumes "no script will ever run on this origin" (`AGENTS.md` §9), yet the app ships **no Content-Security-Policy**, keeps every vault in `localStorage`, and **never auto-locks**. Those three combine into the wallet's real risk: a single future XSS — a dependency compromise, a new `dangerouslySetInnerHTML`, an injected third-party script — becomes wholesale vault extraction, and nothing in the current configuration slows it down.
+The exposure was almost entirely *around* the crypto. The design assumes "no script will ever run on this origin" (`AGENTS.md` §9), yet the app originally shipped **no Content-Security-Policy**, kept every vault in `localStorage`, and **never auto-locked**. Those three combined into the wallet's real risk: a single future XSS — a dependency compromise, a new `dangerouslySetInnerHTML`, an injected third-party script — became wholesale vault extraction. H1 and H2 are fixed and M1/M2 are mitigated below; the remaining findings are lower-severity and mostly operational.
 
-Recommended order of work: **H1** (cheap, high value), then **H2 + M1**, then **M2/M3**.
+Remediation so far: **H1** (CSP and headers), **H2** (IndexedDB), **M1** (30-second idle lock), **M2** (strength nudge and unlock cooldown). Remaining: **M3**, then **M4/M5**, then **L1–L5**, then **I1**.
 
 ### Findings at a glance
 
@@ -25,8 +25,8 @@ Recommended order of work: **H1** (cheap, high value), then **H2 + M1**, then **
 |---|----------|---------|
 | H1 | **High** | No CSP / clickjacking / security headers at all — **fixed in phase 1** |
 | H2 | **High** | Secrets lived in `localStorage` (spec said IndexedDB), no at-rest protection — **fixed** |
-| M1 | Medium | No idle/session timeout; keys stay in memory until `pagehide` |
-| M2 | Medium | Offline brute-force: 8-char minimum, no strength rule, no throttle |
+| M1 | Medium | No idle/session timeout; keys stay in memory until `pagehide` — **fixed** |
+| M2 | Medium | Offline brute-force: 8-char minimum, no strength rule, no throttle — **mitigated** |
 | M3 | Medium | `/api/transactions` is an unauthenticated, unthrottled Etherscan proxy |
 | M4 | Medium | Secret residue in un-zeroizable JS strings (mnemonics/keys) |
 | M5 | Medium | Single trusted RPC for balances, nonce, gas, broadcast, delegation reads |
@@ -127,21 +127,38 @@ What the move does buy: no synchronous single-call dump of every vault, wallets 
 
 ## 3. Medium severity
 
-### M1 — No idle timeout; `lock()` only fires on `pagehide`
+### M1 — No idle timeout; `lock()` only fired on `pagehide`
 
-**Evidence:** `src/components/wallet-unload-lock.tsx` registers `pagehide` only. `walletService.lock()` is invoked on unload, on wallet switch, and around create/import — but there is no idle timer and no `visibilitychange` handling anywhere in `src/`.
+**Status: fixed.**
 
-**Impact:** a wallet left unlocked on a shared or borrowed machine keeps every derived private key in `WalletService.privateKeys` indefinitely, and keeps `signAndSendTransaction` / `revealPrivateKey` reachable. A backgrounded mobile tab stays unlocked the same way. This directly widens the M4 window.
+**Evidence (pre-fix):** `src/components/wallet-unload-lock.tsx` registered `pagehide` only. `walletService.lock()` was invoked on unload, on wallet switch, and around create/import — but there was no idle timer and no `visibilitychange` handling anywhere in `src/`.
 
-**Remediation:** add a configurable idle timeout (for example 5 minutes of no interaction → `lock()`), lock on `visibilitychange` to `hidden` after a short grace period, and surface a "locked due to inactivity" notice so the relock is not mistaken for a bug.
+**Impact:** a wallet left unlocked on a shared or borrowed machine kept every derived private key in `WalletService.privateKeys` indefinitely, and kept `signAndSendTransaction` / `revealPrivateKey` reachable. A backgrounded mobile tab stayed unlocked the same way. This directly widened the M4 window.
+
+**Remediation implemented:**
+
+- `src/lib/idle-lock.ts` — a framework-free controller with an **absolute 30-second deadline**. `noteActivity()` resets it; `check()` locks when wall-clock time passed the deadline while timers were suspended.
+- `src/components/wallet-idle-lock.tsx`, mounted from `src/app/layout.tsx`, listens for `pointerdown`, `keydown`, `touchstart`, `wheel`, and `scroll` (capture phase), and re-checks on `visibilitychange`. Focus/visibility events do **not** count as activity, so returning to an expired tab cannot revive it.
+- `WalletService.lock("inactivity")` plus `getLockReason()`; the unlock form shows "Locked after 30 seconds of inactivity." so the relock is not mistaken for a bug.
+- The existing `pagehide` handler remains as defense in depth.
+
+**Residual:** 30 seconds is deliberately aggressive; a user can be locked mid-form. The timer is absolute, so a background tab that is never revisited still locks on the next visibility check even if the browser throttled the timer.
 
 ### M2 — Offline brute-force of the vault
 
-**Evidence:** `src/core/crypto.ts` — PBKDF2-SHA256 × 600 000, AES-GCM-256, 128-bit tag, fresh 16-byte salt and 12-byte IV per encryption. `validatePassword` enforces only `length >= 8`. There is no strength/entropy check, no breached-password check, and no attempt throttling on `unlock()`.
+**Status: mitigated, with an explicitly accepted residual risk.**
+
+**Evidence (pre-fix):** `src/core/crypto.ts` — PBKDF2-SHA256 × 600 000, AES-GCM-256, 128-bit tag, fresh 16-byte salt and 12-byte IV per encryption. `validatePassword` enforced only `length >= 8`. There was no strength/entropy check, no breached-password check, and no attempt throttling on `unlock()`.
 
 **Impact:** because the ciphertext is local (H2), an attacker who obtains it attacks it **offline**. PBKDF2-SHA256 at 600 000 iterations is roughly tens of thousands of guesses per second on a single modern GPU, so an 8-character memoryless password is recoverable. 600k is a reasonable parameter choice; the weak link is the password policy, not the KDF.
 
-**Remediation:** require (or strongly nudge) a passphrase, e.g. a minimum length plus a visible entropy/strength meter with an explicit warning, and consider raising iterations. Document the offline-attack reality in the UI and README, since it is intrinsic to any client-side vault.
+**Remediation implemented:**
+
+- `src/core/password.ts` + `src/components/password-strength.tsx` — an advisory **weak / fair / strong** meter with a common-pattern list and explicit copy that anyone who obtains the encrypted vault can guess offline. It never blocks submission. The hard requirement stays at **8 characters**, so existing vaults and passwords remain valid.
+- `src/lib/unlock-throttle.ts` — after **3 wrong passwords** the next attempt is refused with a **30-second cooldown**. Attempts 1–2 are free; the counter resets after the cooldown, persists per wallet in `localStorage` (a non-secret failure counter, not key material), clears on success, and expires after 24 h. `cooldownMs` and the clock are injectable for tests.
+- The KDF is unchanged (PBKDF2-SHA256 × 600 000, AES-GCM-256).
+
+**Residual / accepted risk:** the throttle only slows attempts made *through the app*; an attacker who copies the vault bypasses it entirely. With the minimum still at 8 characters and no breached-password list, a determined user can still pick a weak password. The meaningful offline controls remain the PBKDF2 cost and the advisory meter. Raising the minimum would reject passwords already used with existing vaults and was rejected for this iteration; if it is raised later, `validatePassword` and the unlock path need a compatibility decision.
 
 ### M3 — `/api/transactions` is an open proxy to the Etherscan key
 
@@ -218,9 +235,10 @@ JavaScript strings cannot be zeroized. `lock()` drops the references, but heap c
 | `console.*` / `eval` / `innerHTML` in `src/` | None (one static `dangerouslySetInnerHTML` in `theme-script.tsx`, safe today) |
 | `.env` tracked by git | No — ignored at `.gitignore:34`, never in history |
 | Secrets in `localStorage` | Fixed — IndexedDB with one-time import of existing installs (H2) |
-| Idle / auto-lock | Absent (M1) |
+| Idle / auto-lock | Fixed — 30-second absolute deadline, visibility re-check, inactivity notice (M1) |
+| Failed-unlock throttle | Fixed — 3rd failure starts a 30-second cooldown; advisory strength meter (M2) |
 | Security headers | Present in production — verified by `curl -I` and a production browser pass (H1, phase 1) |
 | `pnpm audit` | Failed — registry lacks the advisories endpoint (I1) |
 | Runtime verification | Not performed |
 
-**Priority order for remediation:** H1 → H2 + M1 → M2/M3 → M4/M5 → L1–L5 → I1.
+**Priority order for remediation:** ~~H1~~ → ~~H2 + M1~~ → ~~M2~~/M3 → M4/M5 → L1–L5 → I1.

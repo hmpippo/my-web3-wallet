@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { ThemeScript } from "@/components/theme-script";
+import { WalletIdleLock } from "@/components/wallet-idle-lock";
 import { WalletUnloadLock } from "@/components/wallet-unload-lock";
 import { DEFAULT_THEME_MODE } from "@/lib/theme";
 import "./globals.css";
@@ -21,6 +22,7 @@ export default function RootLayout({
     >
       <body>
         <ThemeScript />
+        <WalletIdleLock />
         <WalletUnloadLock />
         {children}
       </body>
