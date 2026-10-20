@@ -16,6 +16,7 @@ const UPSTREAM_PAGE_SIZE = 20;
 const MAX_CURSOR_LENGTH = 100_000;
 const MAX_CURSOR_BYTES = 75_000;
 const REQUEST_TIMEOUT_MS = 10_000;
+const MIN_CURSOR_SECRET_LENGTH = 32;
 const NO_RECORDS_PATTERN = /^no (transactions|records) found\.?$/i;
 
 const SOURCE_CONFIG = {
@@ -56,6 +57,7 @@ const inFlightPages = new Map<string, Promise<TransactionHistoryPage>>();
 
 export type HistoryServiceErrorCode =
   | "missing-key"
+  | "config"
   | "rate-limit"
   | "provider"
   | "unsupported"
@@ -347,7 +349,7 @@ function decodeCursor(
   encoded: string,
   address: string,
   kind: TransactionHistoryKind | "all",
-  apiKey: string,
+  cursorSecret: string,
   chainId: number,
 ): CursorPayload {
   if (encoded.length > MAX_CURSOR_LENGTH) {
@@ -360,7 +362,9 @@ function decodeCursor(
 
   const payloadPart = encoded.slice(0, separator);
   const signaturePart = encoded.slice(separator + 1);
-  const expectedSignature = createHmac("sha256", apiKey).update(payloadPart).digest();
+  const expectedSignature = createHmac("sha256", cursorSecret)
+    .update(payloadPart)
+    .digest();
   let suppliedSignature: Buffer;
   try {
     suppliedSignature = Buffer.from(signaturePart, "base64url");
@@ -417,9 +421,11 @@ function decodeCursor(
   return parsed as unknown as CursorPayload;
 }
 
-function encodeCursor(payload: CursorPayload, apiKey: string): string {
+function encodeCursor(payload: CursorPayload, cursorSecret: string): string {
   const payloadPart = Buffer.from(JSON.stringify(payload)).toString("base64url");
-  const signature = createHmac("sha256", apiKey).update(payloadPart).digest("base64url");
+  const signature = createHmac("sha256", cursorSecret)
+    .update(payloadPart)
+    .digest("base64url");
   const encoded = `${payloadPart}.${signature}`;
   if (encoded.length > MAX_CURSOR_LENGTH) {
     throw new HistoryServiceError("provider", "Transaction history could not be paginated safely.");
@@ -472,12 +478,19 @@ async function loadHistoryPage(
   cursorValue: string | null,
   kind: TransactionHistoryKind | "all",
   apiKey: string,
+  cursorSecret: string,
   chainId: number,
 ): Promise<TransactionHistoryPage> {
   const normalizedAddress = address.toLowerCase();
   let payload: CursorPayload;
   if (cursorValue) {
-    payload = decodeCursor(cursorValue, normalizedAddress, kind, apiKey, chainId);
+    payload = decodeCursor(
+      cursorValue,
+      normalizedAddress,
+      kind,
+      cursorSecret,
+      chainId,
+    );
   } else {
     let endBlock: bigint;
     try {
@@ -543,8 +556,31 @@ async function loadHistoryPage(
       void sourceOrder;
       return publicItem;
     }),
-    nextCursor: hasMore(payload) ? encodeCursor(payload, apiKey) : null,
+    nextCursor: hasMore(payload) ? encodeCursor(payload, cursorSecret) : null,
   };
+}
+
+/**
+ * Cursors are signed with their own secret so rotating the Etherscan API key
+ * does not invalidate live pagination (and vice versa). Production must set
+ * `HISTORY_CURSOR_SECRET`; local development keeps working without it.
+ */
+function resolveCursorSecret(apiKey: string): string {
+  const configured = process.env.HISTORY_CURSOR_SECRET?.trim();
+  if (configured) {
+    if (configured.length < MIN_CURSOR_SECRET_LENGTH) {
+      throw new HistoryServiceError(
+        "config",
+        "The history cursor secret is too short. Use at least 32 characters.",
+      );
+    }
+    return configured;
+  }
+  if (process.env.NODE_ENV !== "production") return apiKey;
+  throw new HistoryServiceError(
+    "config",
+    "Transaction history is not configured on this server.",
+  );
 }
 
 export async function getEtherscanHistory(
@@ -564,6 +600,7 @@ export async function getEtherscanHistory(
   if (!apiKey) {
     throw new HistoryServiceError("missing-key", "Transaction history is not configured on this server.");
   }
+  const cursorSecret = resolveCursorSecret(apiKey);
 
   const normalizedAddress = address.toLowerCase();
   const normalizedCursor = cursorValue ?? null;
@@ -576,6 +613,7 @@ export async function getEtherscanHistory(
     normalizedCursor,
     kind,
     apiKey,
+    cursorSecret,
     chainId,
   );
   inFlightPages.set(requestKey, request);

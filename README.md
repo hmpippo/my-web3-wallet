@@ -190,11 +190,18 @@ plan change degrades gracefully rather than surfacing a raw provider error.
 
 Set `ETHERSCAN_API_KEY` in the repository's ignored `.env` file for local
 development, and provide the same server-only environment variable in
-deployment. Do not prefix it with `NEXT_PUBLIC_`. Only the public wallet address
-and the selected activity kind and signed continuation cursor are sent to the
-app's history route; wallet mnemonics and private keys are never sent. The
-server route requires a running Next.js server and does not work as a static
-export.
+deployment. Production also needs `HISTORY_CURSOR_SECRET` (for example
+`openssl rand -hex 32`), which signs pagination cursors independently of the
+Etherscan key; history returns `503` until it is set. Do not prefix either
+variable with `NEXT_PUBLIC_`. Browser requests must be same-origin and JSON
+(cross-site and non-JSON calls are rejected), and the route applies an in-memory
+rate limit per IP (30 requests/minute) and per public address (20 requests per
+minute) in each server instance; non-browser callers are subject to the same
+rate limits. Only the public wallet
+address and the selected activity kind and signed continuation cursor are sent
+to the app's history route; wallet mnemonics and private keys are never sent.
+The server route requires a running Next.js server and does not work as a
+static export.
 
 The free Etherscan tier supports a subset of chains, allows up to 3 API calls
 per second, and 100,000 calls per day. A history page requests one page from its

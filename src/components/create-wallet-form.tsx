@@ -57,6 +57,12 @@ export function CreateWalletForm() {
     try {
       await walletService.createWallet(password, backupConfirmed);
       creationCompleted.current = true;
+      // The phrase is now in the encrypted vault; drop the last UI copy
+      // instead of leaving it in component state after navigation.
+      setMnemonic(null);
+      setAddress(null);
+      setPassword("");
+      setPasswordConfirmation("");
       router.replace("/wallet");
     } catch (caught) {
       setError(getErrorMessage(caught));

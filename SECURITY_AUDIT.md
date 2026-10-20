@@ -17,7 +17,7 @@ The cryptographic core is **well built and unusually disciplined**: audited libr
 
 The exposure was almost entirely *around* the crypto. The design assumes "no script will ever run on this origin" (`AGENTS.md` §9), yet the app originally shipped **no Content-Security-Policy**, kept every vault in `localStorage`, and **never auto-locked**. Those three combined into the wallet's real risk: a single future XSS — a dependency compromise, a new `dangerouslySetInnerHTML`, an injected third-party script — became wholesale vault extraction. H1 and H2 are fixed and M1/M2 are mitigated below; the remaining findings are lower-severity and mostly operational.
 
-Remediation so far: **H1** (CSP and headers), **H2** (IndexedDB), **M1** (30-second idle lock), **M2** (strength nudge and unlock cooldown). Remaining: **M3**, then **M4/M5**, then **L1–L5**, then **I1**.
+Remediation so far: **H1** (CSP and headers), **H2** (IndexedDB), **M1** (30-second idle lock), **M2** (strength nudge and unlock cooldown), **M3** (same-origin gate, rate limits, separate cursor secret), **M4** (byte-backed keys and zeroizable pending entropy, with a documented residual). Remaining: **M5**, then **L1–L5**, then **I1**.
 
 ### Findings at a glance
 
@@ -27,8 +27,8 @@ Remediation so far: **H1** (CSP and headers), **H2** (IndexedDB), **M1** (30-sec
 | H2 | **High** | Secrets lived in `localStorage` (spec said IndexedDB), no at-rest protection — **fixed** |
 | M1 | Medium | No idle/session timeout; keys stay in memory until `pagehide` — **fixed** |
 | M2 | Medium | Offline brute-force: 8-char minimum, no strength rule, no throttle — **mitigated** |
-| M3 | Medium | `/api/transactions` is an unauthenticated, unthrottled Etherscan proxy |
-| M4 | Medium | Secret residue in un-zeroizable JS strings (mnemonics/keys) |
+| M3 | Medium | `/api/transactions` proxy — **mitigated** (origin gate, rate limits, separate cursor secret) |
+| M4 | Medium | Secret residue in un-zeroizable JS strings — **mitigated**, residual documented |
 | M5 | Medium | Single trusted RPC for balances, nonce, gas, broadcast, delegation reads |
 | L1 | Low | `data:image/svg+xml` accepted as an NFT image |
 | L2 | Low | Legacy `gasPrice` pricing, no absolute fee cap |
@@ -169,7 +169,13 @@ What the move does buy: no synchronous single-call dump of every vault, wallets 
 - A third party can drain the Etherscan quota and drive up cost.
 - Coupling the signing secret to the API key means rotating the key invalidates all in-flight cursors.
 
-**Remediation:** add rate limiting (per-IP and/or per-address) and, if the endpoint is only meant for the app, an `Origin`/`Sec-Fetch-Site` check. Derive a separate HMAC key (e.g. `HISTORY_CURSOR_SECRET`) so cursor signing and the Etherscan key are independent.
+**Status: mitigated.** Three layers, all server-side:
+
+- **Same-origin gate** (`src/app/api/transactions/route.ts`). Requests whose `Sec-Fetch-Site` is anything other than `same-origin`/`none`, or whose `Origin` host differs from the request host, get `403`. The body must be `application/json`, otherwise `415`. This stops a browser page on another origin from driving the route; it is deliberately not authentication, because non-browser callers can omit both headers.
+- **Fixed-window rate limits** (`src/lib/rate-limit.ts`, `src/lib/history-rate-limit.ts`). 30 requests/minute per client IP and 20 requests/minute per public address, returning `429` with `Retry-After`. The IP budget is consumed before the body is read; the address budget after validation. Expired buckets are pruned and the map is bounded.
+- **Independent cursor key** (`src/services/etherscan-history.ts`). Cursors are signed with `HISTORY_CURSOR_SECRET` (minimum 32 characters), not the Etherscan key. Missing or too-short secrets produce a `config` error mapped to `503` in production; development falls back to the API key so a fresh clone still works. Set it with `openssl rand -hex 32` (`README.md`, `.env.example`).
+
+**Residual / accepted risk:** the limiter is in process memory, so on a multi-instance deployment (Vercel) each instance enforces its own share and the effective global rate is `instances × limit`. A shared store (Upstash Redis / Vercel KV) would make the limits global but adds a dependency and a network hop; deferred deliberately. `x-forwarded-for` is trusted, which is correct on Vercel but spoofable on a self-hosted server unless a trusted proxy overwrites it. Rotating the cursor secret invalidates in-flight cursors (intended). Tests cover the origin/content-type gates, both limits, `Retry-After`, and cursor invalidation after secret rotation.
 
 **Note (positive):** the handler's response handling is strong — strict request byte cap, strict JSON and shape validation, `Cache-Control: no-store`, and the secret never reaches the client bundle (`import "server-only"` plus a non-`NEXT_PUBLIC_` name).
 
@@ -185,7 +191,14 @@ JavaScript strings cannot be zeroized. `lock()` drops the references, but heap c
 
 **Impact:** a heap snapshot, crash core dump, or attached debugger can recover a mnemonic or key that is believed to be cleared. Combined with M1's long unlock window, the exposure window is large.
 
-**Remediation:** minimize post-activation retention of the mnemonic, hold keys as `Uint8Array` where practical, and document the limitation honestly rather than implying full wiping.
+**Status: mitigated, not eliminated.** This is a minimization pass, because V8 strings are immutable and cannot be zeroed once created:
+
+- `src/core/secret.ts` — `secretToBytes` / `bytesToSecret` / `wipeBytes` / `wipeSecretMap`. Session keys now live in `privateKeys: Map<number, Uint8Array>` instead of hex strings, and every session end (`lock()`, wallet switch, account activation) overwrites each buffer with zeros before clearing the map.
+- `pendingWallet` holds BIP-39 **entropy** (`Uint8Array`) instead of the phrase. The words are re-encoded only for the vault write, and the entropy is wiped on lock, on discard, and after a successful creation. `prepareWallet` wipes the entropy and seed on every failure path.
+- Hex is produced only at the signing boundary (`signAndSendTransaction`, `signAndSendTokenTransfer`, `revokeAccountDelegation`) and for the explicit reveal screen, where viem/UI require it.
+- `src/components/create-wallet-form.tsx` drops the phrase from React state immediately after creation; `src/components/reveal-private-key.tsx` drops the revealed key when the session locks or the route changes.
+
+**Residual / accepted risk:** the hex strings created at the signing boundary, the `Hex` returned by `revealPrivateKey` (a user-requested disclosure), and the phrase returned to the setup screen for display still exist as immutable strings until garbage collection. `viem`/`@scure` also create internal hex copies. A heap dump or debugger attached to the tab can still find them; no pure-JavaScript wallet can promise otherwise. What improved is that the *long-lived* session state — the keys kept for the whole unlock window and the phrase kept during backup — is now zeroizable, which shrinks the window from "until lock" to "one signing call". The documentation and UI do not claim full memory erasure.
 
 ### M5 — Single trusted RPC
 
@@ -224,7 +237,7 @@ JavaScript strings cannot be zeroized. `lock()` drops the references, but heap c
 - **NFT ownership checks are deliberately asymmetric.** Fail-closed when adding an NFT (an unproven token is refused) and fail-open when pruning (only a definitive "not owned" removes an entry), so a flaky RPC can never wipe the local list (`src/services/nft-service.ts`, `syncNftOwnership`).
 - **Biometric unlock is well isolated.** Password re-confirmation to enroll, PRF verified *before* anything is persisted, record bound to `rpId`, discoverable + user-verified credentials, and `prfOutput` zeroized (`src/core/webauthn.ts`, `src/core/biometric-vault.ts`).
 - **Minimal attack surface.** No third-party scripts, no analytics, no telemetry; API responses are `no-store`; the Etherscan secret is `server-only` and cannot enter the client bundle.
-- **Test coverage.** 210 unit tests, including crypto round-trip, wrong-password rejection, and deterministic derivation.
+- **Test coverage.** 259 unit tests across 28 files, including crypto round-trip, wrong-password rejection, deterministic derivation, entropy round-trip, cursor-secret handling, and route abuse controls.
 
 ---
 
@@ -237,8 +250,14 @@ JavaScript strings cannot be zeroized. `lock()` drops the references, but heap c
 | Secrets in `localStorage` | Fixed — IndexedDB with one-time import of existing installs (H2) |
 | Idle / auto-lock | Fixed — 30-second absolute deadline, visibility re-check, inactivity notice (M1) |
 | Failed-unlock throttle | Fixed — 3rd failure starts a 30-second cooldown; advisory strength meter (M2) |
+| History route abuse controls | Fixed — same-origin + JSON gate, 30/min per IP, 20/min per address, separate cursor secret (M3) |
+| Session key storage | Mitigated — `Uint8Array` keys, zeroized on lock/switch; pending phrase held as entropy (M4) |
 | Security headers | Present in production — verified by `curl -I` and a production browser pass (H1, phase 1) |
+| History origin / content-type gate | Verified in dev — `403` for cross-site, `415` for non-JSON |
+| History rate limit | Verified in dev — 31st request from one IP returns `429` with `Retry-After: 60` |
+| History upstream | Etherscan timed out from the audit network; the sanitized `502` path was observed, success path covered by mocked tests |
+| M4 runtime behavior | Verified in dev — wallet import works; revealed key disappears when the 30-second idle lock fires |
 | `pnpm audit` | Failed — registry lacks the advisories endpoint (I1) |
-| Runtime verification | Not performed |
+| Runtime verification | Performed with `next-dev-loop` (`/_next/mcp` clean) plus `pnpm build` |
 
-**Priority order for remediation:** ~~H1~~ → ~~H2 + M1~~ → ~~M2~~/M3 → M4/M5 → L1–L5 → I1.
+**Priority order for remediation:** ~~H1~~ → ~~H2 + M1~~ → ~~M2 + M3~~ → ~~M4~~/M5 → L1–L5 → I1.

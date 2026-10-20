@@ -4,7 +4,9 @@ import {
   DEFAULT_PATH,
   deriveAccount,
   deriveAccountAtIndex,
+  entropyToMnemonic,
   generateMnemonic,
+  mnemonicToEntropy,
   mnemonicToSeed,
   validateMnemonic,
 } from "./hd-wallet";
@@ -69,6 +71,16 @@ describe("HD wallet", () => {
     expect(() => accountDerivationPath(1.5)).toThrow("Account index");
     expect(() => accountDerivationPath(Number.MAX_SAFE_INTEGER)).toThrow(
       "Account index",
+    );
+  });
+
+  it("round-trips a mnemonic through zeroizable entropy", () => {
+    const entropy = mnemonicToEntropy(TEST_MNEMONIC);
+
+    expect(entropy).toHaveLength(16);
+    expect(entropyToMnemonic(entropy)).toBe(TEST_MNEMONIC);
+    expect(() => mnemonicToEntropy("invalid phrase")).toThrow(
+      "Invalid BIP-39 mnemonic",
     );
   });
 

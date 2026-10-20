@@ -1,6 +1,11 @@
 import { isAddress, type Address } from "viem";
 import { isSupportedChainId } from "@/core/chain";
 import {
+  clientIp,
+  historyAddressLimiter,
+  historyIpLimiter,
+} from "@/lib/history-rate-limit";
+import {
   getEtherscanHistory,
   HistoryServiceError,
 } from "@/services/etherscan-history";
@@ -15,6 +20,40 @@ function jsonError(message: string, status: number): Response {
     { error: message },
     { status, headers: { "Cache-Control": "no-store" } },
   );
+}
+
+function rateLimited(retryAfterMs: number): Response {
+  return Response.json(
+    { error: "Too many history requests. Try again shortly." },
+    {
+      status: 429,
+      headers: {
+        "Cache-Control": "no-store",
+        "Retry-After": String(Math.max(1, Math.ceil(retryAfterMs / 1000))),
+      },
+    },
+  );
+}
+
+/**
+ * Stops other origins from driving this route from a browser. `Origin` is
+ * set by the browser and cannot be forged by page script; `Sec-Fetch-Site`
+ * adds a second signal where supported. Non-browser callers omit both, so
+ * this is not authentication — the rate limits below handle abuse.
+ */
+function isSameOrigin(request: Request): boolean {
+  const fetchSite = request.headers.get("sec-fetch-site");
+  if (fetchSite && fetchSite !== "same-origin" && fetchSite !== "none") {
+    return false;
+  }
+
+  const origin = request.headers.get("origin");
+  if (!origin) return true;
+  try {
+    return new URL(origin).host === new URL(request.url).host;
+  } catch {
+    return false;
+  }
 }
 
 async function readRequestBody(request: Request): Promise<string> {
@@ -53,6 +92,19 @@ async function readRequestBody(request: Request): Promise<string> {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  if (!isSameOrigin(request)) {
+    return jsonError("The history request origin is not allowed.", 403);
+  }
+
+  const contentType = request.headers.get("content-type") ?? "";
+  if (!contentType.toLowerCase().startsWith("application/json")) {
+    return jsonError("The history request must be JSON.", 415);
+  }
+
+  // Cheap rejection before touching the body or the provider.
+  const ipLimit = historyIpLimiter.consume(clientIp(request));
+  if (!ipLimit.allowed) return rateLimited(ipLimit.retryAfterMs);
+
   let rawBody: string;
   try {
     rawBody = await readRequestBody(request);
@@ -107,6 +159,11 @@ export async function POST(request: Request): Promise<Response> {
     return jsonError("The history request is invalid.", 400);
   }
 
+  const addressLimit = historyAddressLimiter.consume(
+    requestBody.address.toLowerCase(),
+  );
+  if (!addressLimit.allowed) return rateLimited(addressLimit.retryAfterMs);
+
   try {
     const history = await getEtherscanHistory(
       requestBody.address.toLowerCase() as Address,
@@ -122,6 +179,11 @@ export async function POST(request: Request): Promise<Response> {
       switch (error.code) {
         case "missing-key":
           return jsonError(error.message, 503);
+        case "config":
+          return jsonError(
+            "Transaction history is not configured on this server.",
+            503,
+          );
         case "cursor":
           return jsonError("The history cursor is invalid. Refresh history to continue.", 400);
         case "rate-limit":

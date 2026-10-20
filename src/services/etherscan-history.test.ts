@@ -24,6 +24,7 @@ const SENDER = "0x0000000000000000000000000000000000000002";
 const RECIPIENT = "0x0000000000000000000000000000000000000003";
 const TOKEN = "0x0000000000000000000000000000000000000004";
 const API_KEY = "test-only-etherscan-key";
+const CURSOR_SECRET = "cursor-test-secret-0123456789abcdef";
 const SEPOLIA = 11155111;
 
 type Kind = "normal" | "internal" | "erc20";
@@ -82,6 +83,7 @@ describe("Etherscan history service", () => {
 
   beforeEach(() => {
     process.env.ETHERSCAN_API_KEY = API_KEY;
+    process.env.HISTORY_CURSOR_SECRET = CURSOR_SECRET;
     getBlockNumber.mockResolvedValue(BigInt(11925000));
     records = {
       normal: Array.from({ length: 20 }, (_, index) =>
@@ -117,6 +119,8 @@ describe("Etherscan history service", () => {
 
   afterEach(() => {
     delete process.env.ETHERSCAN_API_KEY;
+    delete process.env.HISTORY_CURSOR_SECRET;
+    vi.unstubAllEnvs();
     getBlockNumber.mockReset();
     vi.unstubAllGlobals();
   });
@@ -257,6 +261,40 @@ describe("Etherscan history service", () => {
     await expect(history(ADDRESS)).rejects.toMatchObject({
       code: "missing-key",
     });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects cursors after the cursor secret changes", async () => {
+    const firstPage = await history(ADDRESS);
+    const cursor = firstPage.nextCursor!;
+    expect(cursor).toBeTruthy();
+
+    process.env.HISTORY_CURSOR_SECRET = `${CURSOR_SECRET}-rotated`;
+
+    await expect(history(ADDRESS, cursor)).rejects.toMatchObject({
+      code: "cursor",
+    });
+  });
+
+  it("falls back to the API key outside production", async () => {
+    delete process.env.HISTORY_CURSOR_SECRET;
+
+    const page = await history(ADDRESS);
+    expect(page.items.length).toBeGreaterThan(0);
+  });
+
+  it("requires a cursor secret in production", async () => {
+    delete process.env.HISTORY_CURSOR_SECRET;
+    vi.stubEnv("NODE_ENV", "production");
+
+    await expect(history(ADDRESS)).rejects.toMatchObject({ code: "config" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a cursor secret that is too short", async () => {
+    process.env.HISTORY_CURSOR_SECRET = "too-short";
+
+    await expect(history(ADDRESS)).rejects.toMatchObject({ code: "config" });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

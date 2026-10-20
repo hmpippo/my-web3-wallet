@@ -57,9 +57,13 @@ export function RevealPrivateKey() {
     "idle" | "warning" | "cleared"
   >("idle");
 
-  // Drop the revealed key as soon as this screen stops being the active route,
-  // so a round trip to the account page can never leave it readable.
-  if (unlocked && unlocked.path !== pathname) {
+  // Drop the revealed key as soon as this screen stops being the active route
+  // or the session locks (manual lock or the idle timeout), so neither a round
+  // trip to the account page nor an unattended tab can leave it readable.
+  if (
+    unlocked &&
+    (!walletState.isUnlocked || unlocked.path !== pathname)
+  ) {
     setUnlocked(null);
   }
   const privateKey = unlocked?.key ?? null;

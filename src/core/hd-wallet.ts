@@ -1,6 +1,8 @@
 import { HDKey } from "@scure/bip32";
 import {
+  entropyToMnemonic as scureEntropyToMnemonic,
   generateMnemonic as scureGenerateMnemonic,
+  mnemonicToEntropy as scureMnemonicToEntropy,
   mnemonicToSeed as scureMnemonicToSeed,
   validateMnemonic as scureValidateMnemonic,
 } from "@scure/bip39";
@@ -45,6 +47,23 @@ export async function mnemonicToSeed(
     throw new Error("Invalid BIP-39 mnemonic");
   }
   return scureMnemonicToSeed(normalizedMnemonic, passphrase);
+}
+
+/**
+ * BIP-39 entropy is the zeroizable form of a recovery phrase. The wallet keeps
+ * it while a new wallet waits for backup confirmation, and re-encodes the words
+ * only when the vault is written.
+ */
+export function mnemonicToEntropy(mnemonic: string): Uint8Array {
+  const normalizedMnemonic = normalizeMnemonic(mnemonic);
+  if (!scureValidateMnemonic(normalizedMnemonic, wordlist)) {
+    throw new Error("Invalid BIP-39 mnemonic");
+  }
+  return scureMnemonicToEntropy(normalizedMnemonic, wordlist);
+}
+
+export function entropyToMnemonic(entropy: Uint8Array): string {
+  return scureEntropyToMnemonic(entropy, wordlist);
 }
 
 export function deriveAccount(

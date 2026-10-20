@@ -10,13 +10,20 @@ import {
 } from "@/core/crypto";
 import {
   deriveAccountAtIndex,
+  entropyToMnemonic,
   generateMnemonic,
+  mnemonicToEntropy,
   mnemonicToSeed,
   validateMnemonic,
   accountDerivationPath,
   MAX_ADDRESS_INDEX,
 } from "@/core/hd-wallet";
 import { addressFromPrivateKey, normalizePrivateKey } from "@/core/private-key";
+import {
+  bytesToSecret,
+  secretToBytes,
+  wipeSecretMap,
+} from "@/core/secret";
 import { encodeVaultSecret, parseVaultSecret } from "@/core/vault-secret";
 import {
   createWalletId,
@@ -172,17 +179,18 @@ export interface WalletServiceDependencies {
   getActiveChainId?: () => number;
 }
 
-interface PendingWallet extends PreparedWallet {
+interface PendingWallet extends Omit<PreparedWallet, "mnemonic"> {
   id: string;
   name: string;
   account: WalletAccount;
-  privateKey: Hex;
+  /** BIP-39 entropy, kept instead of the phrase string. Zeroized on lock. */
+  entropy: Uint8Array;
   seed: Uint8Array;
 }
 
 export class WalletService {
   private seed: Uint8Array | null = null;
-  private readonly privateKeys = new Map<number, Hex>();
+  private readonly privateKeys = new Map<number, Uint8Array>();
   private state: WalletState = Object.freeze({
     isUnlocked: false,
     address: null,
@@ -274,21 +282,27 @@ export class WalletService {
     const operationVersion = this.operationVersion;
 
     const mnemonic = generateMnemonic();
-    const { account, seed } = await deriveAccountFromMnemonic(mnemonic, 0);
+    const entropy = mnemonicToEntropy(mnemonic);
+    let seed: Uint8Array | null = null;
     try {
+      const { account, seed: derivedSeed } = await deriveAccountFromMnemonic(
+        mnemonic,
+        0,
+      );
+      seed = derivedSeed;
       this.assertOperationCurrent(operationVersion);
       this.pendingWallet = {
         id: createWalletId(),
         name: this.nextWalletName(),
-        mnemonic,
+        entropy,
         address: account.address,
         account: createWalletAccount(0, account.address),
-        privateKey: account.privateKey,
         seed,
       };
       return { mnemonic, address: account.address };
     } catch (error) {
-      seed.fill(0);
+      seed?.fill(0);
+      entropy.fill(0);
       throw error;
     }
   }
@@ -311,8 +325,11 @@ export class WalletService {
     const operationVersion = this.operationVersion;
 
     try {
+      // Re-encode the phrase only for the vault write; the long-lived pending
+      // state holds zeroizable entropy instead of the phrase.
+      const mnemonic = entropyToMnemonic(pendingWallet.entropy);
       const vault = await encryptVault(
-        encodeVaultSecret({ kind: "mnemonic", secret: pendingWallet.mnemonic }),
+        encodeVaultSecret({ kind: "mnemonic", secret: mnemonic }),
         password,
       );
       this.assertOperationCurrent(operationVersion);
@@ -347,10 +364,17 @@ export class WalletService {
       this.assertOperationCurrent(operationVersion);
       this.registry = registry;
 
-      this.activateWallet(pendingWallet.seed, [pendingWallet.account], 0, pendingWallet.privateKey);
+      const firstAccount = deriveAccountAtIndex(pendingWallet.seed, 0);
+      this.activateWallet(
+        pendingWallet.seed,
+        [pendingWallet.account],
+        0,
+        secretToBytes(firstAccount.privateKey),
+      );
       this.pendingWallet = null;
+      pendingWallet.entropy.fill(0);
       return {
-        mnemonic: pendingWallet.mnemonic,
+        mnemonic,
         address: pendingWallet.address,
       };
     } finally {
@@ -407,7 +431,12 @@ export class WalletService {
       this.assertOperationCurrent(operationVersion);
       this.registry = registry;
       const walletAccount = createWalletAccount(0, account.address);
-      this.activateWallet(seed, [walletAccount], 0, account.privateKey);
+      this.activateWallet(
+        seed,
+        [walletAccount],
+        0,
+        secretToBytes(account.privateKey),
+      );
       seedTransferred = true;
       return account.address;
     } finally {
@@ -459,7 +488,10 @@ export class WalletService {
     await this.storage.saveRegistry(registry);
     this.assertOperationCurrent(operationVersion);
     this.registry = registry;
-    this.activateImportedWallet(createImportedAccount(address), normalizedKey);
+    this.activateImportedWallet(
+      createImportedAccount(address),
+      secretToBytes(normalizedKey),
+    );
     return address;
   }
 
@@ -536,7 +568,7 @@ export class WalletService {
       await this.storage.saveAccountMetadata(walletId, createImportedMetadata());
       this.assertOperationCurrent(operationVersion);
     }
-    this.activateImportedWallet(account, normalizedKey);
+    this.activateImportedWallet(account, secretToBytes(normalizedKey));
   }
 
   /**
@@ -554,6 +586,7 @@ export class WalletService {
     }
 
     const { account, seed } = await deriveAccountFromMnemonic(mnemonic, 0);
+    let selectedPrivateKey: Uint8Array | null = null;
     try {
       this.assertOperationCurrent(operationVersion);
       const storedMetadata = await this.storage.loadAccountMetadata(walletId);
@@ -561,7 +594,6 @@ export class WalletService {
       const metadata = storedMetadata ?? createDefaultMetadata();
       const selectedPath = resolveSelectedPath(metadata);
       const accounts: WalletAccount[] = [];
-      let selectedPrivateKey: Hex | null = null;
       for (const storedAccount of metadata.accounts) {
         const index = accountIndexFromPath(storedAccount.path);
         const derived = index === 0 ? account : deriveAccountAtIndex(seed, index);
@@ -576,7 +608,7 @@ export class WalletService {
         };
         accounts.push(walletAccount);
         if (storedAccount.path === selectedPath) {
-          selectedPrivateKey = derived.privateKey;
+          selectedPrivateKey = secretToBytes(derived.privateKey);
         }
       }
 
@@ -589,10 +621,13 @@ export class WalletService {
       }
       const selectedIndex = accountIndexFromPath(selectedPath);
       if (!selectedPrivateKey) {
-        selectedPrivateKey = deriveAccountAtIndex(seed, selectedIndex).privateKey;
+        selectedPrivateKey = secretToBytes(
+          deriveAccountAtIndex(seed, selectedIndex).privateKey,
+        );
       }
       this.activateWallet(seed, accounts, selectedIndex, selectedPrivateKey);
     } catch (error) {
+      selectedPrivateKey?.fill(0);
       seed.fill(0);
       throw error;
     }
@@ -606,10 +641,13 @@ export class WalletService {
     this.nftOwnershipSyncInProgress = false;
     this.seed?.fill(0);
     this.seed = null;
-    this.privateKeys.clear();
+    wipeSecretMap(this.privateKeys);
+    if (this.pendingWallet) {
+      this.pendingWallet.seed.fill(0);
+      this.pendingWallet.entropy.fill(0);
+      this.pendingWallet = null;
+    }
     this.updateState(false, [], null);
-    this.pendingWallet?.seed.fill(0);
-    this.pendingWallet = null;
   }
 
   /** Why the last session ended, so the unlock screen can explain an auto-lock. */
@@ -956,7 +994,7 @@ export class WalletService {
       const accounts = [...this.state.accounts, walletAccount];
       await this.persistAccounts(accounts, index);
       this.assertOperationCurrent(operationVersion);
-      this.privateKeys.set(index, account.privateKey);
+      this.privateKeys.set(index, secretToBytes(account.privateKey));
       this.updateState(true, accounts, index);
       return walletAccount;
     } finally {
@@ -980,7 +1018,7 @@ export class WalletService {
       const privateKey = this.privateKeys.get(index);
       if (!privateKey && this.seed) {
         const derived = deriveAccountAtIndex(this.seed, index);
-        this.privateKeys.set(index, derived.privateKey);
+        this.privateKeys.set(index, secretToBytes(derived.privateKey));
       }
       await this.persistAccounts(this.state.accounts, index);
       this.assertOperationCurrent(operationVersion);
@@ -1396,7 +1434,8 @@ export class WalletService {
       chainId: tx.chainId,
       gas: tx.estimate?.gas,
       gasPrice: tx.estimate?.gasPrice,
-      privateKey,
+      // Hex is required at the signing boundary; the long-lived copy is bytes.
+      privateKey: bytesToSecret(privateKey),
     });
   }
 
@@ -1443,7 +1482,7 @@ export class WalletService {
       chainId: tx.chainId,
       gas: tx.estimate?.gas,
       gasPrice: tx.estimate?.gasPrice,
-      privateKey,
+      privateKey: bytesToSecret(privateKey),
     });
   }
 
@@ -1482,7 +1521,7 @@ export class WalletService {
     return this.revokeDelegation({
       address: selectedAccount.address,
       chainId,
-      privateKey,
+      privateKey: bytesToSecret(privateKey),
     });
   }
 
@@ -1558,11 +1597,11 @@ export class WalletService {
     seed: Uint8Array,
     accounts: readonly WalletAccount[],
     selectedIndex: number,
-    privateKey: Hex,
+    privateKey: Uint8Array,
   ): void {
     this.seed?.fill(0);
     this.seed = seed;
-    this.privateKeys.clear();
+    wipeSecretMap(this.privateKeys);
     this.privateKeys.set(selectedIndex, privateKey);
     this.updateState(true, accounts, selectedIndex);
     // A wallet session just started: reconcile the stored NFT list against the
@@ -1574,10 +1613,13 @@ export class WalletService {
    * Starts a session for an imported-key wallet: no seed exists, and the single
    * account's key is the only entry in the in-memory key map.
    */
-  private activateImportedWallet(account: WalletAccount, privateKey: Hex): void {
+  private activateImportedWallet(
+    account: WalletAccount,
+    privateKey: Uint8Array,
+  ): void {
     this.seed?.fill(0);
     this.seed = null;
-    this.privateKeys.clear();
+    wipeSecretMap(this.privateKeys);
     this.privateKeys.set(account.index, privateKey);
     this.updateState(true, [account], account.index);
     void this.syncNftOwnership();
