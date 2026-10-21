@@ -1374,7 +1374,8 @@ input {
   flex: 0 0 auto;
 }
 
-.overflow-menu-trigger {
+.overflow-menu-trigger,
+.settings-menu-trigger {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1388,17 +1389,20 @@ input {
   padding: 0;
 }
 
-.overflow-menu-trigger:hover {
+.overflow-menu-trigger:hover,
+.settings-menu-trigger:hover {
   border-color: var(--line-strong);
   background: var(--surface-hover);
 }
 
-.overflow-menu-trigger:focus-visible {
+.overflow-menu-trigger:focus-visible,
+.settings-menu-trigger:focus-visible {
   outline: 3px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
-.overflow-menu-trigger svg {
+.overflow-menu-trigger svg,
+.settings-menu-trigger svg {
   width: 1.15rem;
   height: 1.15rem;
 }
@@ -1410,11 +1414,17 @@ input {
   z-index: 20;
   display: grid;
   min-width: 11rem;
+  max-width: calc(100vw - 2rem);
   border: 1px solid var(--line);
   border-radius: 0.75rem;
   background: var(--surface);
   padding: 0.35rem;
   box-shadow: 0 0.8rem 2rem var(--shadow-medium);
+}
+
+.overflow-menu-dropdown-above {
+  top: auto;
+  bottom: calc(100% + 0.4rem);
 }
 
 .overflow-menu-item {
@@ -1451,21 +1461,100 @@ input {
   height: 100%;
 }
 
-.theme-menu {
-  min-width: 9.5rem;
+/* --- Global settings gear --- */
+
+.settings-menu {
+  position: relative;
+  flex: 0 0 auto;
 }
 
-.theme-menu .overflow-menu-item[aria-checked="true"] {
+.settings-menu-panel {
+  position: absolute;
+  top: calc(100% + 0.4rem);
+  right: 0;
+  z-index: 30;
+  display: grid;
+  width: min(16rem, calc(100vw - 2rem));
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: var(--surface);
+  padding: 0.4rem;
+  box-shadow: 0 0.8rem 2rem var(--shadow-medium);
+}
+
+.settings-menu-section {
+  display: grid;
+  gap: 0.3rem;
+  padding: 0.35rem;
+}
+
+.settings-menu-section h2 {
+  margin: 0 0 0.15rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.theme-options {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.theme-option {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  border: 0;
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--foreground);
+  cursor: pointer;
+  padding: 0.55rem 0.6rem;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-align: left;
+}
+
+.theme-option:hover {
+  background: var(--surface-hover-strong);
+}
+
+.theme-option:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.theme-option[aria-checked="true"] {
   color: var(--accent);
 }
 
-.theme-menu-check {
+.theme-option-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 1rem;
+  height: 1rem;
+  color: var(--muted);
+}
+
+.theme-option[aria-checked="true"] .theme-option-icon {
+  color: var(--accent);
+}
+
+.theme-option-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.theme-option-check {
   display: inline-flex;
   margin-left: auto;
   color: var(--accent);
 }
 
-.theme-menu-check svg {
+.theme-option-check svg {
   width: 0.95rem;
   height: 0.95rem;
 }
@@ -2266,8 +2355,7 @@ input {
   }
 
   .history-heading {
-    align-items: flex-start;
-    flex-direction: column;
+    align-items: center;
   }
 
   .history-item {
@@ -3002,7 +3090,8 @@ input {
     min-height: 2.75rem;
   }
 
-  .overflow-menu-trigger {
+  .overflow-menu-trigger,
+  .settings-menu-trigger {
     width: 2.75rem;
     height: 2.75rem;
   }
@@ -3094,10 +3183,11 @@ input {
   }
 }
 
-@media (max-width: 380px) {
+@media (max-width: 440px) {
   /*
-    The wordmark and the network control cannot share a 320px header without
-    squeezing both. Keep the W mark, which still carries the accessible name.
+    The wordmark and the network pill cannot share a narrow header without
+    pushing the settings gear off-screen. Keep the W mark, which still carries
+    the accessible name.
   */
   .brand-name {
     display: none;
@@ -3107,7 +3197,9 @@ input {
     min-width: 2.75rem;
     justify-content: center;
   }
+}
 
+@media (max-width: 380px) {
   .header-tools {
     gap: 0.5rem;
   }

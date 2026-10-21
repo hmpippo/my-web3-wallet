@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ChainSwitcher } from "@/components/chain-switcher";
-import { ThemeToggle } from "@/components/theme-toggle";
+import { SettingsMenu } from "@/components/settings-menu";
 
 export function SiteHeader() {
   return (
@@ -13,7 +13,7 @@ export function SiteHeader() {
       </Link>
       <div className="header-tools">
         <ChainSwitcher />
-        <ThemeToggle />
+        <SettingsMenu />
       </div>
     </header>
   );

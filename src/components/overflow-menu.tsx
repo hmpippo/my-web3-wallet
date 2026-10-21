@@ -1,7 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useLayoutEffect,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
 export type OverflowMenuIcon =
   | "unlock"
@@ -35,7 +41,10 @@ interface OverflowMenuProps {
 /** A hamburger button that opens a small list of actions or links. */
 export function OverflowMenu({ label, items }: OverflowMenuProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [placement, setPlacement] = useState<"below" | "above">("below");
   const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -60,6 +69,30 @@ export function OverflowMenu({ label, items }: OverflowMenuProps) {
     };
   }, [isOpen]);
 
+  // Flip the menu above the trigger when the viewport is too short below it,
+  // so a trigger near the bottom of the page never opens its list off-screen.
+  useLayoutEffect(() => {
+    if (!isOpen) return;
+
+    function placeMenu() {
+      const trigger = triggerRef.current;
+      const menu = menuRef.current;
+      if (!trigger || !menu) return;
+      const spaceBelow =
+        window.innerHeight - trigger.getBoundingClientRect().bottom;
+      setPlacement(spaceBelow < menu.offsetHeight + 12 ? "above" : "below");
+    }
+
+    placeMenu();
+    window.addEventListener("resize", placeMenu);
+    return () => window.removeEventListener("resize", placeMenu);
+  }, [isOpen]);
+
+  function toggle() {
+    if (!isOpen) setPlacement("below");
+    setIsOpen(!isOpen);
+  }
+
   return (
     <div className="overflow-menu" ref={containerRef}>
       <button
@@ -67,7 +100,8 @@ export function OverflowMenu({ label, items }: OverflowMenuProps) {
         aria-haspopup="menu"
         aria-label={label}
         className="overflow-menu-trigger"
-        onClick={() => setIsOpen((open) => !open)}
+        onClick={toggle}
+        ref={triggerRef}
         type="button"
       >
         <svg
@@ -82,7 +116,14 @@ export function OverflowMenu({ label, items }: OverflowMenuProps) {
         </svg>
       </button>
       {isOpen ? (
-        <div aria-label={label} className="overflow-menu-dropdown" role="menu">
+        <div
+          aria-label={label}
+          className={`overflow-menu-dropdown${
+            placement === "above" ? " overflow-menu-dropdown-above" : ""
+          }`}
+          ref={menuRef}
+          role="menu"
+        >
           {items.map((item) => {
             const className = `overflow-menu-item${
               item.tone === "danger" ? " overflow-menu-item-danger" : ""
