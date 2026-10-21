@@ -10,11 +10,13 @@ import {
   walletService,
 } from "@/services/wallet-service";
 import { AccountSwitcher } from "@/components/account-switcher";
+import { BiometricToggle } from "@/components/biometric-toggle";
 import { MainAction, MainActions } from "@/components/action-tile";
 import { CopyButton } from "@/components/copy-button";
 import { TransactionHistory } from "@/components/transaction-history";
 import { TokenPortfolio } from "@/components/token-portfolio";
 import { NftPortfolio } from "@/components/nft-portfolio";
+import { LockIcon } from "@/components/wallet-icons";
 
 export function WalletDashboard() {
   const router = useRouter();
@@ -85,14 +87,15 @@ export function WalletDashboard() {
           <h1>Your wallet</h1>
         </div>
         <div className="dashboard-heading-actions">
-          <Link className="text-link" href="/settings">
-            Settings
-          </Link>
+          <BiometricToggle
+            key={walletState.selectedWalletId ?? "no-wallet"}
+          />
           <button
-            className="button button-outline"
+            className="button button-outline lock-wallet-button"
             onClick={lockWallet}
             type="button"
           >
+            <LockIcon />
             Lock wallet
           </button>
         </div>

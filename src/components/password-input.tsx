@@ -1,11 +1,13 @@
 "use client";
 
-import { useState, type InputHTMLAttributes } from "react";
+import { useState, type InputHTMLAttributes, type Ref } from "react";
 
 interface PasswordInputProps
   extends Omit<InputHTMLAttributes<HTMLInputElement>, "type"> {
   /** Noun used in the toggle label, e.g. "password" or "private key". */
   revealLabel?: string;
+  /** Lets a dialog move focus into the field when it opens. */
+  inputRef?: Ref<HTMLInputElement>;
 }
 
 /**
@@ -17,6 +19,7 @@ interface PasswordInputProps
  */
 export function PasswordInput({
   revealLabel = "password",
+  inputRef,
   ...inputProps
 }: PasswordInputProps) {
   const [visible, setVisible] = useState(false);
@@ -24,7 +27,7 @@ export function PasswordInput({
 
   return (
     <span className="password-input-wrapper">
-      <input {...inputProps} type={visible ? "text" : "password"} />
+      <input {...inputProps} ref={inputRef} type={visible ? "text" : "password"} />
       <button
         aria-label={`${action} ${revealLabel}`}
         aria-pressed={visible}

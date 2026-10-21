@@ -1,5 +1,7 @@
 "use client";
 
+import type { Ref } from "react";
+
 interface ToggleSwitchProps {
   /** Whether the switch is on. */
   checked: boolean;
@@ -8,6 +10,8 @@ interface ToggleSwitchProps {
   /** Accessible name, e.g. "Hide USDC". */
   label: string;
   disabled?: boolean;
+  /** Lets the caller return focus to the switch after closing a dialog. */
+  switchRef?: Ref<HTMLButtonElement>;
 }
 
 /** A small on/off switch (iOS-style track + knob) used for token visibility. */
@@ -16,6 +20,7 @@ export function ToggleSwitch({
   onChange,
   label,
   disabled = false,
+  switchRef,
 }: ToggleSwitchProps) {
   return (
     <button
@@ -24,6 +29,7 @@ export function ToggleSwitch({
       className="toggle-switch"
       disabled={disabled}
       onClick={() => onChange(!checked)}
+      ref={switchRef}
       role="switch"
       type="button"
     >
