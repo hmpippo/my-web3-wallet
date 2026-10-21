@@ -80,7 +80,7 @@ The implemented header set, applied to `/:path*`:
 - `X-Frame-Options: DENY` (belt-and-braces alongside `frame-ancestors 'none'`)
 - `Referrer-Policy: no-referrer`
 - `X-Content-Type-Options: nosniff` (Vercel also sets this; kept so self-hosting is correct)
-- `Permissions-Policy` — `camera`, `microphone`, and `geolocation` disabled, while **`publickey-credentials-create` / `publickey-credentials-get` are explicitly kept enabled** so biometric unlock (`src/core/webauthn.ts`) still works.
+- `Permissions-Policy` — `microphone` and `geolocation` disabled, **`publickey-credentials-create` / `publickey-credentials-get` are explicitly kept enabled** so biometric unlock (`src/core/webauthn.ts`) still works, and `camera=(self)` is allowed only for the recipient QR scanner on the Send page (`src/components/qr-scanner-dialog.tsx`). The scanner requests the stream from a click handler, decodes frames locally, and stops every track when the dialog closes.
 
 **Known residual gaps in phase 1:**
 

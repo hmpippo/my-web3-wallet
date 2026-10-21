@@ -54,11 +54,13 @@ const securityHeaders = [
   // Vercel sets this too; keeping it makes a self-hosted deployment correct.
   { key: "X-Content-Type-Options", value: "nosniff" },
   // publickey-credentials-* must stay enabled or biometric unlock breaks
-  // (src/core/webauthn.ts uses navigator.credentials).
+  // (src/core/webauthn.ts uses navigator.credentials). camera is limited to
+  // this origin for the recipient QR scanner on the Send page; microphone and
+  // geolocation stay disabled.
   {
     key: "Permissions-Policy",
     value:
-      "camera=(), microphone=(), geolocation=(), publickey-credentials-create=(self), publickey-credentials-get=(self)",
+      "camera=(self), microphone=(), geolocation=(), publickey-credentials-create=(self), publickey-credentials-get=(self)",
   },
 ];
 

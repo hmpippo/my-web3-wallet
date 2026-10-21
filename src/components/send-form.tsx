@@ -13,17 +13,20 @@ import {
 import {
   formatGwei,
   formatUnits,
-  getAddress,
-  isAddress,
   parseUnits,
   type Address,
   type Hash,
 } from "viem";
-import { getExplorerTxUrl } from "@/core/chain";
+import { getChain, getExplorerTxUrl } from "@/core/chain";
 import { isUnusuallyHighFee } from "@/core/fees";
 import type { StoredWalletToken } from "@/core/storage";
 import { useActiveChain } from "@/lib/use-active-chain";
+import {
+  parseRecipientInput,
+  RecipientInputError,
+} from "@/lib/recipient-input";
 import { CopyButton } from "@/components/copy-button";
+import { QrScannerDialog } from "@/components/qr-scanner-dialog";
 import {
   estimateErc20Transfer,
   estimateNativeTransfer,
@@ -76,6 +79,8 @@ export function SendForm() {
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
   const [renderedChainId, setRenderedChainId] = useState(chainId);
 
   const requestedTokenMatch = requestedToken
@@ -105,6 +110,8 @@ export function SendForm() {
     setSubmission(null);
     setError(null);
     setIsBusy(false);
+    setScannerOpen(false);
+    setScanError(null);
   }
 
   useEffect(
@@ -113,6 +120,78 @@ export function SendForm() {
     },
     [],
   );
+
+  function chainName(id: number): string {
+    try {
+      return getChain(id).name;
+    } catch {
+      return `chain ${id}`;
+    }
+  }
+
+  function describeRecipientError(caught: unknown): string {
+    if (caught instanceof RecipientInputError) {
+      if (caught.sourceChainId !== undefined) {
+        return `This payment link is for ${chainName(caught.sourceChainId)}, but the wallet is on ${chain.name}. Switch networks before sending.`;
+      }
+      return caught.message;
+    }
+    return "Recipient address is invalid";
+  }
+
+  /**
+   * Parses typed, pasted, or scanned input and resolves a token named by a
+   * payment link against the tokens already added to this account. Unknown
+   * tokens are never auto-imported, so a malicious link cannot hide which
+   * contract the user is about to interact with.
+   */
+  function resolveRecipient(raw: string): {
+    address: Address;
+    amount?: bigint;
+    token: StoredWalletToken | null;
+  } {
+    const parsed = parseRecipientInput(raw, { chainId });
+    if (!parsed.token) {
+      return { address: parsed.address, amount: parsed.amount, token: null };
+    }
+    const token = visibleTokens.find(
+      (candidate) =>
+        candidate.address.toLowerCase() === parsed.token?.toLowerCase(),
+    );
+    if (!token) {
+      throw new RecipientInputError(
+        `This payment link asks for token ${parsed.token}, which isn't added to this account. Add it in Tokens, then scan again.`,
+      );
+    }
+    return { address: parsed.address, amount: parsed.amount, token };
+  }
+
+  function handleScan(raw: string) {
+    try {
+      const parsed = resolveRecipient(raw);
+      if (parsed.token) {
+        setAssetId(parsed.token.address);
+      } else if (parsed.amount !== undefined) {
+        // A native EIP-681 link always means the chain's own coin.
+        setAssetId(NATIVE_ASSET);
+      }
+      if (parsed.amount !== undefined) {
+        const decimals = parsed.token ? parsed.token.decimals : native.decimals;
+        setAmount(formatUnits(parsed.amount, decimals));
+      }
+      setTo(parsed.address);
+      setReview(null);
+      setSubmission(null);
+      setError(null);
+      setScanError(null);
+      setIsBusy(false);
+      setScannerOpen(false);
+      reviewRequestId.current += 1;
+    } catch (caught) {
+      // Keep the scanner open so the user can simply try another code.
+      setScanError(describeRecipientError(caught));
+    }
+  }
 
   async function reviewTransfer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -125,14 +204,39 @@ export function SendForm() {
     try {
       const from = walletService.getAddress();
       if (!from) throw new Error("Wallet is locked. Unlock it to continue.");
-      if (!isAddress(to)) {
-        throw new TypeError("Recipient address is invalid");
+
+      let parsedRecipient: ReturnType<typeof resolveRecipient>;
+      try {
+        parsedRecipient = resolveRecipient(to);
+      } catch (caught) {
+        throw new Error(describeRecipientError(caught));
+      }
+      if (
+        parsedRecipient.token &&
+        parsedRecipient.token.address.toLowerCase() !==
+          selectedToken?.address.toLowerCase()
+      ) {
+        throw new Error(
+          `This payment link is for ${parsedRecipient.token.symbol}. Select it in the Asset field, then review the transfer.`,
+        );
       }
 
-      const recipient = getAddress(to);
+      const recipient = parsedRecipient.address;
       const value = selectedToken
         ? parseUnits(amount, selectedToken.decimals)
         : parseUnits(amount, native.decimals);
+      if (
+        parsedRecipient.amount !== undefined &&
+        parsedRecipient.amount !== value
+      ) {
+        const decimals = selectedToken
+          ? selectedToken.decimals
+          : native.decimals;
+        const symbol = selectedToken ? selectedToken.symbol : native.symbol;
+        throw new Error(
+          `This payment link requests ${formatUnits(parsedRecipient.amount, decimals)} ${symbol}. Enter that amount or scan the code again.`,
+        );
+      }
       const estimate = selectedToken
         ? await estimateErc20Transfer({
             from,
@@ -249,6 +353,7 @@ export function SendForm() {
               onChange={(event) => {
                 reviewRequestId.current += 1;
                 setAssetId(event.target.value);
+                setScanError(null);
                 setReview(null);
                 setIsBusy(false);
               }}
@@ -269,20 +374,41 @@ export function SendForm() {
           ) : null}
           <label>
             Recipient address
-            <input
-              autoComplete="off"
-              onChange={(event) => {
-                reviewRequestId.current += 1;
-                setTo(event.target.value);
-                setReview(null);
-                setIsBusy(false);
-              }}
-              disabled={isBusy}
-              placeholder="0x..."
-              required
-              spellCheck={false}
-              value={to}
-            />
+            <span className="recipient-field">
+              <input
+                aria-label="Recipient address"
+                autoComplete="off"
+                onChange={(event) => {
+                  reviewRequestId.current += 1;
+                  setTo(event.target.value);
+                  setScanError(null);
+                  setReview(null);
+                  setIsBusy(false);
+                }}
+                disabled={isBusy}
+                placeholder="0x... or ethereum: link"
+                required
+                spellCheck={false}
+                value={to}
+              />
+              <button
+                aria-label="Scan recipient QR code"
+                className="recipient-scan-button"
+                disabled={isBusy}
+                onClick={() => {
+                  setScanError(null);
+                  setScannerOpen(true);
+                }}
+                type="button"
+              >
+                <ScanIcon />
+                Scan
+              </button>
+            </span>
+            <span className="field-help">
+              Type or paste an address, or scan a wallet QR code. Payment links
+              fill in the amount and token for you.
+            </span>
           </label>
           <label>
             Amount ({assetSymbol})
@@ -436,6 +562,35 @@ export function SendForm() {
           Back to wallet
         </Link>
       </section>
+
+      {scannerOpen ? (
+        <QrScannerDialog
+          errorMessage={scanError}
+          onClose={() => {
+            setScannerOpen(false);
+            setScanError(null);
+          }}
+          onScan={handleScan}
+        />
+      ) : null}
     </main>
+  );
+}
+
+/** Viewfinder corners plus a scan line, matching the menu icon style. */
+function ScanIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.6"
+      viewBox="0 0 16 16"
+    >
+      <path d="M2 5.5V4a2 2 0 0 1 2-2h1.5M10.5 2H12a2 2 0 0 1 2 2v1.5M14 10.5V12a2 2 0 0 1-2 2h-1.5M5.5 14H4a2 2 0 0 1-2-2v-1.5" />
+      <path d="M2 8h12" />
+    </svg>
   );
 }

@@ -43,10 +43,12 @@ Open [http://localhost:3000](http://localhost:3000) to view the app.
 - `src/services/account-abstraction-service.ts` — EIP-7702 delegation reads and revocation
 - `src/app/api/transactions/route.ts` — validated same-origin history endpoint
 - `src/lib/address.ts` — address truncation for display
+- `src/lib/recipient-input.ts` — recipient parsing for typed, pasted, and scanned addresses and EIP-681 payment links
 - `src/lib/theme.ts` — theme-mode validation and light/dark resolution
 - `src/lib/base64.ts` — shared base64 and base64url helpers for vaults and credentials
 - `src/lib/clipboard.ts` — clipboard writes with an `execCommand` fallback
 - `src/lib/use-active-chain.ts` — React hook that subscribes to the persisted active-chain store
+- `src/components/qr-scanner-dialog.tsx` — local camera QR scanner used by the Send form
 - `src/types/transaction-history.ts` — shared transaction-history types
 
 Wallet creation displays a recovery phrase before asking the user to confirm
@@ -54,7 +56,10 @@ its backup and set a password. The vault is not persisted before confirmation.
 Import and unlock are local operations. Locking clears the service's in-memory
 derived keys and account state, including on page unload. Native and token
 transfers show the EIP-1559 gas limit, max fee per gas, priority fee, and
-maximum network fee before confirmation. The browser UI is still a
+maximum network fee before confirmation. The recipient field accepts typed or
+pasted addresses and `ethereum:` payment links, and can scan a wallet QR code
+with the device camera; frames are decoded locally and the camera is released
+as soon as the scanner closes. The browser UI is still a
 self-custody wallet MVP: testnets hold worthless funds, mainnets move real
 assets, and you should never enter a recovery phrase used for real funds.
 
