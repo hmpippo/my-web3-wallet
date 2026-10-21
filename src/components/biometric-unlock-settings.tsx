@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { walletService } from "@/services/wallet-service";
+import { InstallApp } from "@/components/install-app";
 import { PasswordInput } from "@/components/password-input";
 
 type BiometricStatus = "loading" | "unsupported" | "enabled" | "disabled";
@@ -63,6 +64,7 @@ export function BiometricUnlockSettings() {
 
   return (
     <main className="page-main form-page">
+      <InstallApp context="settings" />
       <section className="form-card" aria-labelledby="biometric-title">
         <p className="eyebrow">Security</p>
         <h1 id="biometric-title">Biometric unlock</h1>
@@ -143,7 +145,7 @@ export function BiometricUnlockSettings() {
           devices. The encrypted wallet itself still has to be set up on each
           device with your password first.
         </p>
-        <Link className="text-link" href="/wallet">
+        <Link className="text-link back-link" href="/wallet">
           Back to wallet
         </Link>
       </section>

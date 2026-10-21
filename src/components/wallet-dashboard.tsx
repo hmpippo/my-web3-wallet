@@ -3,13 +3,13 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import { truncateAddress } from "@/lib/address";
 import { useActiveChain } from "@/lib/use-active-chain";
 import {
   selectAccountNfts,
   selectAccountTokens,
   walletService,
 } from "@/services/wallet-service";
+import { AccountSwitcher } from "@/components/account-switcher";
 import { MainAction, MainActions } from "@/components/action-tile";
 import { CopyButton } from "@/components/copy-button";
 import { TransactionHistory } from "@/components/transaction-history";
@@ -113,34 +113,34 @@ export function WalletDashboard() {
             {chain.name} {isTestnet ? "testnet" : "mainnet"}
           </span>
         </div>
-        <div className="account-controls">
-          <label htmlFor="wallet-account">Accounts in this wallet</label>
-          <select
-            id="wallet-account"
-            aria-label="Select account"
-            onChange={(event) => void handleAccountChange(Number(event.target.value))}
-            value={walletState.selectedAccountIndex ?? 0}
-          >
-            {visibleAccounts.map((account) => (
-              <option key={account.index} value={account.index}>
-                {account.name} · {account.address}
-              </option>
-            ))}
-          </select>
+        <div className="account-picker-block">
+          <div className="account-picker-heading">
+            <span className="account-picker-label">
+              Accounts in this wallet
+            </span>
+            <Link className="text-link account-manage-link" href="/accounts">
+              Manage accounts
+            </Link>
+          </div>
+          {address ? (
+            <div className="account-picker-row">
+              <AccountSwitcher
+                accounts={visibleAccounts}
+                onSelect={(index) => void handleAccountChange(index)}
+                selectedIndex={walletState.selectedAccountIndex}
+              />
+              <CopyButton
+                className="account-picker-copy"
+                label="account address"
+                value={address}
+              />
+            </div>
+          ) : null}
         </div>
-        <Link className="text-link account-manage-link" href="/accounts">
-          Manage accounts
-        </Link>
         {accountError ? (
           <p className="form-error" role="alert">
             {accountError}
           </p>
-        ) : null}
-        {address ? (
-          <div className="selected-address">
-            <code title={address}>{truncateAddress(address)}</code>
-            <CopyButton label="your address" value={address} />
-          </div>
         ) : null}
         <MainActions ariaLabel="Account actions" className="dashboard-actions">
           <MainAction href="/send" icon="send" label="Send" />

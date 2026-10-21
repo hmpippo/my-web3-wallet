@@ -9,7 +9,7 @@ export function SiteHeader() {
         <span aria-hidden="true" className="brand-mark">
           W
         </span>
-        <span>my wallet</span>
+        <span className="brand-name">my wallet</span>
       </Link>
       <div className="header-tools">
         <ChainSwitcher />

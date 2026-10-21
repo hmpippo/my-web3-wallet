@@ -12,6 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Plain service worker; not part of the TypeScript app graph.
+    "public/sw.js",
   ]),
 ]);
 

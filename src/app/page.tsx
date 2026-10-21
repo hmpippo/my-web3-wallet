@@ -1,3 +1,4 @@
+import { InstallApp } from "@/components/install-app";
 import { SiteHeader } from "@/components/site-header";
 import { WalletManager } from "@/components/wallet-manager";
 
@@ -18,6 +19,7 @@ export default function Home() {
           </p>
         </section>
 
+        <InstallApp />
         <WalletManager />
       </main>
     </>
