@@ -145,7 +145,7 @@ export function BiometricUnlockSettings() {
           devices. The encrypted wallet itself still has to be set up on each
           device with your password first.
         </p>
-        <Link className="text-link" href="/wallet">
+        <Link className="text-link back-link" href="/wallet">
           Back to wallet
         </Link>
       </section>

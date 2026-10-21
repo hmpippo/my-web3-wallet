@@ -20,6 +20,7 @@ import {
 import { getChain, getExplorerTxUrl } from "@/core/chain";
 import { isUnusuallyHighFee } from "@/core/fees";
 import type { StoredWalletToken } from "@/core/storage";
+import { truncateAddress } from "@/lib/address";
 import { useActiveChain } from "@/lib/use-active-chain";
 import {
   parseRecipientInput,
@@ -67,6 +68,7 @@ export function SendForm() {
   const requestedToken = searchParams.get("token");
   const reviewRequestId = useRef(0);
   const sendInProgress = useRef(false);
+  const recipientInputRef = useRef<HTMLTextAreaElement | null>(null);
   // `null` means "no explicit choice yet", so an incoming `?token=` request
   // still selects the token without fighting a stale default.
   const [assetId, setAssetId] = useState<string | null>(null);
@@ -120,6 +122,23 @@ export function SendForm() {
     },
     [],
   );
+
+  // The recipient field wraps on narrow screens. Height is set from the
+  // content so a full address is visible without a horizontal scrollbar,
+  // including in browsers without `field-sizing: content`.
+  useEffect(() => {
+    const field = recipientInputRef.current;
+    if (!field) return;
+
+    const fitToContent = () => {
+      field.style.height = "auto";
+      field.style.height = `${Math.min(field.scrollHeight, 128)}px`;
+    };
+
+    fitToContent();
+    window.addEventListener("resize", fitToContent);
+    return () => window.removeEventListener("resize", fitToContent);
+  }, [to]);
 
   function chainName(id: number): string {
     try {
@@ -340,10 +359,17 @@ export function SendForm() {
       <section className="preview-card" aria-label="Send">
         <form className="send-fields" onSubmit={reviewTransfer}>
           <p className="muted-copy send-account">
-            Sending from {selectedAddress ?? "locked wallet"}
+            <span>Sending from</span>
             {selectedAddress ? (
-              <CopyButton label="your address" value={selectedAddress} />
-            ) : null}
+              <>
+                <code title={selectedAddress}>
+                  {truncateAddress(selectedAddress)}
+                </code>
+                <CopyButton label="your address" value={selectedAddress} />
+              </>
+            ) : (
+              <span>locked wallet</span>
+            )}
           </p>
           <label>
             Asset
@@ -375,19 +401,29 @@ export function SendForm() {
           <label>
             Recipient address
             <span className="recipient-field">
-              <input
+              <textarea
                 aria-label="Recipient address"
                 autoComplete="off"
+                disabled={isBusy}
                 onChange={(event) => {
                   reviewRequestId.current += 1;
-                  setTo(event.target.value);
+                  // Addresses and payment links are single-line values; a
+                  // stray line break from the keyboard must not end up in one.
+                  setTo(event.target.value.replace(/[\r\n]+/g, ""));
                   setScanError(null);
                   setReview(null);
                   setIsBusy(false);
                 }}
-                disabled={isBusy}
-                placeholder="0x... or ethereum: link"
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    event.currentTarget.form?.requestSubmit();
+                  }
+                }}
+                placeholder="0x... or payment link"
+                ref={recipientInputRef}
                 required
+                rows={1}
                 spellCheck={false}
                 value={to}
               />
@@ -399,10 +435,11 @@ export function SendForm() {
                   setScanError(null);
                   setScannerOpen(true);
                 }}
+                title="Scan recipient QR code"
                 type="button"
               >
                 <ScanIcon />
-                Scan
+                <span className="recipient-scan-label">Scan</span>
               </button>
             </span>
             <span className="field-help">

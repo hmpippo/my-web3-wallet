@@ -380,10 +380,19 @@ input {
 .text-button {
   border: 0;
   background: transparent;
-  color: var(--disabled);
-  cursor: not-allowed;
+  color: var(--muted);
+  cursor: pointer;
   font-size: 0.85rem;
   font-weight: 700;
+}
+
+.text-button:hover:not(:disabled) {
+  color: var(--accent);
+}
+
+.text-button:disabled {
+  color: var(--disabled);
+  cursor: not-allowed;
 }
 
 .preview-note {
@@ -751,7 +760,14 @@ input {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 1rem;
+  row-gap: 0.85rem;
+}
+
+.dashboard-heading > .button,
+.dashboard-heading-actions .button {
+  white-space: nowrap;
 }
 
 .dashboard-heading .eyebrow {
@@ -2209,7 +2225,7 @@ input {
   }
 
   .account-management-row {
-    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
   }
 
   .account-management-row > .overflow-menu {
@@ -2543,7 +2559,9 @@ input {
 .dashboard-heading-actions {
   display: flex;
   align-items: center;
-  gap: 1.1rem;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.1rem;
+  margin-left: auto;
 }
 
 
@@ -2710,5 +2728,387 @@ input {
         100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 2.5rem
       )
     );
+  }
+}
+
+/* --- Mobile account picker --- */
+/* (kept at the end so it wins over the desktop defaults) */
+
+.account-picker-block {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 1.25rem;
+}
+
+.account-picker-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.account-picker-label {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.account-picker-heading .account-manage-link {
+  margin-top: 0;
+  font-size: 0.78rem;
+}
+
+.account-picker-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.account-picker {
+  position: relative;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.account-picker-trigger {
+  display: flex;
+  width: 100%;
+  min-height: 3.4rem;
+  align-items: center;
+  gap: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.7rem;
+  background: var(--surface);
+  padding: 0.55rem 0.8rem;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.account-picker-trigger:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--surface-hover);
+}
+
+.account-picker-trigger:focus-visible {
+  border-color: var(--accent);
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.account-picker-trigger:disabled,
+.account-picker-trigger[aria-disabled="true"] {
+  cursor: default;
+}
+
+.account-picker-identity {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 0.15rem;
+}
+
+.account-picker-name {
+  overflow: hidden;
+  font-size: 0.9rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-picker-address {
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-picker-chevron {
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+  color: var(--muted);
+  transition: transform 120ms ease;
+}
+
+.account-picker-trigger[aria-expanded="true"] .account-picker-chevron {
+  transform: rotate(180deg);
+}
+
+.account-picker-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 0.4rem);
+  left: 0;
+  display: grid;
+  gap: 0.15rem;
+  width: min(100%, 22rem);
+  max-height: 15rem;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: var(--surface);
+  padding: 0.3rem;
+  box-shadow: 0 0.8rem 2rem var(--shadow-medium);
+}
+
+.account-picker-menu[data-placement="above"] {
+  top: auto;
+  bottom: calc(100% + 0.4rem);
+}
+
+.account-picker-option {
+  display: flex;
+  width: 100%;
+  min-height: 2.75rem;
+  align-items: center;
+  gap: 0.65rem;
+  border: 0;
+  border-radius: 0.5rem;
+  background: transparent;
+  padding: 0.45rem 0.55rem;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  font: inherit;
+}
+
+.account-picker-option:hover,
+.account-picker-option:focus-visible {
+  outline: none;
+  background: var(--surface-hover-strong);
+}
+
+.account-picker-option[aria-selected="true"] {
+  background: var(--accent-soft);
+}
+
+.account-picker-option-text {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 0.1rem;
+}
+
+.account-picker-option-text strong {
+  overflow: hidden;
+  font-size: 0.85rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-picker-option-text code {
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-picker-check {
+  width: 1rem;
+  height: 1rem;
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+.account-picker-row .account-picker-copy {
+  width: 3.4rem;
+  height: auto;
+  flex: 0 0 auto;
+  border-color: var(--line);
+  border-radius: 0.7rem;
+  background: var(--surface);
+}
+
+.account-picker-row .account-picker-copy:hover {
+  border-color: var(--line-strong);
+  background: var(--surface-hover);
+}
+
+/* --- Recipient field that wraps long addresses --- */
+
+.recipient-field textarea {
+  min-width: 0;
+  flex: 1 1 auto;
+  min-height: 3rem;
+  max-height: 8rem;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+  background: var(--input-bg);
+  padding: 0.72rem 0.9rem;
+  color: var(--foreground);
+  font: inherit;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  resize: none;
+}
+
+.recipient-field textarea::placeholder {
+  color: var(--placeholder);
+}
+
+.recipient-field textarea:focus {
+  border-color: var(--accent);
+  outline: 3px solid var(--focus-ring);
+}
+
+.recipient-field textarea:disabled {
+  cursor: not-allowed;
+}
+
+.send-account {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.send-account code {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+
+/* --- Phone adaptation --- */
+
+@media (max-width: 640px) {
+  .page-main {
+    padding-top: 2.75rem;
+    padding-bottom: 3rem;
+  }
+
+  /*
+    iOS Safari zooms the whole page when a focused form control is smaller
+    than 16px. The :not() chain wins over the component font sizes above.
+  */
+  .page-main input:not([type="checkbox"]):not([type="radio"]),
+  .page-main select,
+  .page-main textarea,
+  .site-header select {
+    font-size: 16px;
+  }
+
+  .button {
+    min-height: 2.75rem;
+  }
+
+  .brand {
+    min-height: 2.75rem;
+  }
+
+  .overflow-menu-trigger {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+
+  .copy-button {
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+
+  .password-visibility {
+    right: 0.25rem;
+    width: 2.75rem;
+    height: 2.75rem;
+  }
+
+  .chain-switcher-control {
+    min-height: 2.75rem;
+  }
+
+  .dashboard-heading-actions .text-link,
+  .account-picker-heading .account-manage-link,
+  .text-link.back-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 2.75rem;
+  }
+
+  .account-picker-heading {
+    align-items: center;
+  }
+
+  .recipient-field {
+    align-items: center;
+  }
+
+  .recipient-scan-button {
+    width: 3rem;
+    height: 3rem;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .recipient-scan-label {
+    display: none;
+  }
+
+  .portfolio-tab,
+  .history-tab {
+    min-height: 2.75rem;
+  }
+
+  .back-link {
+    padding: 0.35rem 0;
+  }
+}
+
+@media (max-width: 400px) {
+  /*
+    Just above the point where the wordmark is hidden, the brand and the
+    network/theme controls only have a few pixels between them. Tighten both
+    gaps so the header never becomes a single unbroken strip.
+  */
+  .brand {
+    gap: 0.5rem;
+  }
+
+  .header-tools {
+    gap: 0.75rem;
+  }
+
+  .main-actions {
+    column-gap: 0.5rem;
+    padding-bottom: 2.6rem;
+  }
+
+  /*
+    Absolute labels are laid out against the icon square, so without an
+    explicit max-content width a longer label ("Account Abstract") wraps as
+    soon as it is wider than the 64px tile. The action centers are far enough
+    apart for one line at this size.
+  */
+  .main-action-label {
+    width: max-content;
+    max-width: 7rem;
+    font-size: 0.7rem;
+    line-height: 1.2;
+    white-space: nowrap;
+    text-align: center;
+  }
+}
+
+@media (max-width: 380px) {
+  /*
+    The wordmark and the network control cannot share a 320px header without
+    squeezing both. Keep the W mark, which still carries the accessible name.
+  */
+  .brand-name {
+    display: none;
+  }
+
+  .brand {
+    min-width: 2.75rem;
+    justify-content: center;
+  }
+
+  .header-tools {
+    gap: 0.5rem;
   }
 }
