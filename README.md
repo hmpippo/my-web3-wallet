@@ -191,6 +191,63 @@ changes the preference. A tiny inline script applies the stored palette before
 the first paint, so a user who chose light does not see a flash of the dark
 theme while the app hydrates.
 
+## Installable app (PWA)
+
+The wallet can be installed as a standalone app on iOS/iPadOS and macOS. It
+uses a web app manifest, an Apple touch icon, and a small service worker. The
+service worker caches only public app-shell resources (HTML, JS/CSS, icons, and
+`offline.html`); API responses, RPC calls, wallet secrets, and NFT metadata are
+never written to Cache Storage.
+
+On iPhone/iPad: open the app in Safari, tap Share, then **Add to Home Screen**.
+On macOS Safari: choose **File → Add to Dock**. Chrome and Edge expose an
+install icon in the address bar.
+
+### Install before creating a wallet on Apple platforms
+
+Home Screen web apps on iOS, and Safari web apps on macOS, can use a **separate
+local storage container** from the browser tab. A wallet created in Safari may
+therefore not appear in the installed app. Install first, then create or import
+the wallet inside the installed app. Existing users must re-import the recovery
+phrase (or private key) in the installed app; there is no automatic migration
+between the two containers.
+
+Deleting the installed app or clearing its website data deletes its local
+encrypted vault. The recovery phrase remains the only reliable backup. The app
+asks the browser for persistent storage after the first write, but that request
+is best effort and does not replace a backup.
+
+### Offline behavior
+
+After the app has been loaded once online, the service worker can serve the
+cached app shell on a later offline launch. Create wallet, import wallet,
+unlock, and receive-address flows are local and can work offline. Balances,
+token/NFT data, transaction history, gas estimates, and sending require a
+network connection. If no app shell is available, the service worker shows
+`offline.html` instead of a browser error.
+
+The service worker is registered in production only. Test it with:
+
+```bash
+pnpm build
+pnpm start
+```
+
+To test on a phone, use an HTTPS deployment or a tunnel; `localhost` on the
+phone is not the development machine.
+
+### Icons
+
+Source artwork lives in `public/icons/icon.svg`. The generated assets are:
+
+- `src/app/apple-icon.png` (180×180, no transparency)
+- `public/icons/icon-192.png`
+- `public/icons/icon-512.png`
+- `public/icons/icon-maskable-512.png`
+
+iOS caches Home Screen icons aggressively. After changing an icon, remove the
+app from the Home Screen and add it again.
+
 ## Transaction history
 
 The wallet dashboard has separate tabs for normal native transactions, internal

@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#0b1310" />
+    <title>Offline · My Wallet</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --background: #f4f7f4;
+        --surface: #ffffff;
+        --foreground: #17221d;
+        --muted: #69766f;
+        --line: #e2e9e4;
+        --accent: #146b4b;
+        --accent-hover: #0f593e;
+        --on-accent: #ffffff;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          color-scheme: dark;
+          --background: #0b1310;
+          --surface: #121c17;
+          --foreground: #e7efe9;
+          --muted: #9cafa3;
+          --line: #26352c;
+          --accent: #1d7a55;
+          --accent-hover: #238c62;
+          --on-accent: #ffffff;
+        }
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        display: grid;
+        min-height: 100vh;
+        min-height: 100dvh;
+        margin: 0;
+        padding: max(2rem, env(safe-area-inset-top))
+          max(1.25rem, env(safe-area-inset-right))
+          max(2rem, env(safe-area-inset-bottom))
+          max(1.25rem, env(safe-area-inset-left));
+        place-items: center;
+        background:
+          radial-gradient(ellipse at 80% 0%, #e5f2e9 0, transparent 36rem),
+          var(--background);
+        color: var(--foreground);
+        font-family: Arial, Helvetica, sans-serif;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        body {
+          background:
+            radial-gradient(ellipse at 80% 0%, #0f2a1e 0, transparent 36rem),
+            var(--background);
+        }
+      }
+
+      main {
+        width: min(100%, 30rem);
+        border: 1px solid var(--line);
+        border-radius: 1.25rem;
+        background: var(--surface);
+        padding: clamp(1.5rem, 6vw, 2.5rem);
+        box-shadow: 0 1rem 3rem rgb(0 0 0 / 12%);
+      }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.75rem;
+        margin-bottom: 2.5rem;
+        font-size: 1.05rem;
+        font-weight: 700;
+        letter-spacing: -0.035em;
+      }
+
+      .mark {
+        display: grid;
+        width: 2rem;
+        height: 2rem;
+        place-items: center;
+        border-radius: 0.7rem;
+        background: var(--accent);
+        color: var(--on-accent);
+        font-size: 0.95rem;
+      }
+
+      .eyebrow {
+        margin: 0 0 0.75rem;
+        color: var(--accent);
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: clamp(2rem, 8vw, 3rem);
+        letter-spacing: -0.06em;
+        line-height: 1;
+      }
+
+      p {
+        color: var(--muted);
+        font-size: 0.95rem;
+        line-height: 1.7;
+      }
+
+      .button {
+        display: inline-flex;
+        min-height: 2.75rem;
+        align-items: center;
+        justify-content: center;
+        margin-top: 1rem;
+        border-radius: 0.65rem;
+        background: var(--accent);
+        color: var(--on-accent);
+        padding: 0 1.1rem;
+        font-size: 0.85rem;
+        font-weight: 700;
+        text-decoration: none;
+      }
+
+      .button:hover {
+        background: var(--accent-hover);
+      }
+
+      .note {
+        margin: 1.5rem 0 0;
+        padding-top: 1.25rem;
+        border-top: 1px solid var(--line);
+        font-size: 0.8rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="brand">
+        <span class="mark" aria-hidden="true">W</span>
+        <span>my wallet</span>
+      </div>
+      <p class="eyebrow">Offline</p>
+      <h1>You’re offline.</h1>
+      <p>
+        My Wallet needs a network connection to load balances, transaction
+        history, and send transfers. Your encrypted wallet remains on this
+        device.
+      </p>
+      <a class="button" href="/">Try again</a>
+      <p class="note">
+        Reconnect to the internet and reopen the app. Never enter a recovery
+        phrase you use for real funds into an untrusted device.
+      </p>
+    </main>
+  </body>
+</html>

@@ -123,6 +123,7 @@
 
 body {
   min-height: 100vh;
+  min-height: 100dvh;
   margin: 0;
   background:
     radial-gradient(ellipse at 80% 0%, var(--glow) 0, transparent 36rem),
@@ -2563,4 +2564,151 @@ input {
 
 .fee-warning strong {
   color: var(--warning-strong);
+}
+
+/* --- Install prompt --- */
+
+.install-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+  border: 1px solid var(--line);
+  border-radius: 1.25rem;
+  background: var(--surface);
+  padding: 1.25rem 1.5rem;
+  box-shadow: 0 0.75rem 2rem var(--shadow-soft);
+}
+
+.install-copy h2 {
+  margin: 0;
+  font-size: 1.15rem;
+  letter-spacing: -0.04em;
+}
+
+.install-copy .eyebrow {
+  margin-bottom: 0.5rem;
+}
+
+.install-copy .muted-copy {
+  margin-top: 0.45rem;
+}
+
+.install-warning {
+  margin: 0.9rem 0 0;
+  border: 1px solid var(--warning-line);
+  border-radius: 0.7rem;
+  background: var(--warning-bg);
+  color: var(--warning);
+  padding: 0.7rem 0.8rem;
+  font-size: 0.8rem;
+  line-height: 1.55;
+}
+
+.install-note {
+  margin: 0.75rem 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.install-actions {
+  display: grid;
+  min-width: 12rem;
+  justify-items: start;
+  gap: 0.65rem;
+}
+
+.install-steps {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.install-steps summary {
+  color: var(--accent);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.install-steps ol,
+.install-steps ul {
+  margin: 0.6rem 0 0;
+  padding-left: 1.2rem;
+  line-height: 1.6;
+}
+
+.install-status {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+@media (max-width: 640px) {
+  .install-card {
+    flex-direction: column;
+    padding: 1.15rem 1.2rem;
+  }
+
+  .install-actions {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+/* --- Standalone PWA safe areas --- */
+
+:root {
+  --status-bar-bg: #146b4b;
+}
+
+:root[data-theme="dark"] {
+  --status-bar-bg: #0b1310;
+}
+
+@media (display-mode: standalone) {
+  .install-card {
+    display: none;
+  }
+
+  body {
+    padding-top: env(safe-area-inset-top);
+    padding-right: env(safe-area-inset-right);
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+  }
+
+  /*
+    iOS uses white status-bar text with black-translucent. Paint the inset so
+    the text has a readable background in both themes.
+  */
+  body::before {
+    position: fixed;
+    z-index: 100;
+    top: 0;
+    right: 0;
+    left: 0;
+    height: env(safe-area-inset-top);
+    background: var(--status-bar-bg);
+    content: "";
+    pointer-events: none;
+  }
+
+  .nft-detail-backdrop,
+  .scanner-backdrop {
+    padding-top: max(1.25rem, env(safe-area-inset-top));
+    padding-right: max(1.25rem, env(safe-area-inset-right));
+    padding-bottom: max(1.25rem, env(safe-area-inset-bottom));
+    padding-left: max(1.25rem, env(safe-area-inset-left));
+  }
+
+  .nft-detail {
+    max-height: min(
+      90dvh,
+      calc(
+        100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 2.5rem
+      )
+    );
+  }
 }
