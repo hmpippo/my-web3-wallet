@@ -81,10 +81,7 @@ export function WalletDashboard() {
     <main className="page-main">
       <section className="page-heading dashboard-heading">
         <div>
-          <p className="eyebrow">
-            {selectedWallet ? selectedWallet.name : "Your wallet"} · {chain.name}
-          </p>
-          <h1>Your wallet</h1>
+          <h1>{selectedWallet ? selectedWallet.name : "Your wallet"}</h1>
         </div>
         <div className="dashboard-heading-actions">
           <BiometricToggle
@@ -109,13 +106,7 @@ export function WalletDashboard() {
       )}
 
       <section className="preview-card balance-card" aria-labelledby="account-heading">
-        <div className="balance-topline">
-          <h2 id="account-heading">Account</h2>
-          <span className="network-label">
-            <span className="status-dot" aria-hidden="true" />
-            {chain.name} {isTestnet ? "testnet" : "mainnet"}
-          </span>
-        </div>
+        <h2 id="account-heading">Account</h2>
         <div className="account-picker-block">
           <div className="account-picker-heading">
             <span className="account-picker-label">

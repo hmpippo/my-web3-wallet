@@ -70,6 +70,7 @@ import {
   normalizeTokenAddress,
   readTokenMetadata,
 } from "./token-service";
+import { addressBookService } from "./address-book-service";
 
 export interface WalletState {
   readonly isUnlocked: boolean;
@@ -179,6 +180,20 @@ export interface WalletServiceDependencies {
   }) => Promise<Hash>;
   /** Supplies the chain used by background work (NFT ownership sync). */
   getActiveChainId?: () => number;
+  /**
+   * Records a wallet's public account labels for recipient resolution.
+   * Best-effort: address-book failures never fail a wallet operation.
+   */
+  rememberWalletAccounts?: (
+    walletId: string,
+    accounts: readonly {
+      readonly path: string;
+      readonly address: Address;
+      readonly name: string;
+    }[],
+  ) => Promise<void> | void;
+  /** Drops a deleted wallet's implicit address-book entries. */
+  forgetWalletAccounts?: (walletId: string) => Promise<void> | void;
 }
 
 interface PendingWallet extends Omit<PreparedWallet, "mnemonic"> {
@@ -239,6 +254,12 @@ export class WalletService {
   private readonly revokeDelegation: NonNullable<
     WalletServiceDependencies["revokeDelegation"]
   >;
+  private readonly rememberWalletAccounts: NonNullable<
+    WalletServiceDependencies["rememberWalletAccounts"]
+  >;
+  private readonly forgetWalletAccounts: NonNullable<
+    WalletServiceDependencies["forgetWalletAccounts"]
+  >;
   private readonly biometric: BiometricUnlockProvider;
   private readonly unlockThrottle: UnlockThrottle;
   private lastLockReason: LockReason | null = null;
@@ -259,6 +280,13 @@ export class WalletService {
       dependencies.readDelegatedAddress ?? defaultReadDelegatedAddress;
     this.revokeDelegation =
       dependencies.revokeDelegation ?? defaultRevokeDelegation;
+    this.rememberWalletAccounts =
+      dependencies.rememberWalletAccounts ??
+      ((walletId, accounts) =>
+        addressBookService.rememberWalletAccounts(walletId, accounts));
+    this.forgetWalletAccounts =
+      dependencies.forgetWalletAccounts ??
+      ((walletId) => addressBookService.forgetWallet(walletId));
     this.biometric = dependencies.biometric ?? defaultBiometricProvider;
   }
 
@@ -911,6 +939,7 @@ export class WalletService {
         this.state.selectedAccountIndex,
       );
     }
+    this.forgetWalletAccountsSafely(walletId);
   }
 
   /**
@@ -998,6 +1027,7 @@ export class WalletService {
       this.assertOperationCurrent(operationVersion);
       this.privateKeys.set(index, secretToBytes(account.privateKey));
       this.updateState(true, accounts, index);
+      this.recordWalletAccounts(accounts);
       return walletAccount;
     } finally {
       this.finishAccountMutation(mutationVersion);
@@ -1050,6 +1080,7 @@ export class WalletService {
       await this.persistAccounts(accounts, this.state.selectedAccountIndex);
       this.assertOperationCurrent(operationVersion);
       this.updateState(true, accounts, this.state.selectedAccountIndex);
+      this.recordWalletAccounts(accounts);
     } finally {
       this.finishAccountMutation(mutationVersion);
     }
@@ -1608,6 +1639,7 @@ export class WalletService {
     wipeSecretMap(this.privateKeys);
     this.privateKeys.set(selectedIndex, privateKey);
     this.updateState(true, accounts, selectedIndex);
+    this.recordWalletAccounts(accounts);
     // A wallet session just started: reconcile the stored NFT list against the
     // chain in the background (see syncNftOwnership).
     void this.syncNftOwnership();
@@ -1626,6 +1658,7 @@ export class WalletService {
     wipeSecretMap(this.privateKeys);
     this.privateKeys.set(account.index, privateKey);
     this.updateState(true, [account], account.index);
+    this.recordWalletAccounts([account]);
     void this.syncNftOwnership();
   }
 
@@ -1664,6 +1697,30 @@ export class WalletService {
     if (mutationVersion === this.accountMutationVersion) {
       this.accountMutationInProgress = false;
     }
+  }
+
+  /**
+   * Mirrors the unlocked wallet's public account labels into the address book.
+   *
+   * Fire-and-forget by design: the wallet must unlock and send even when
+   * IndexedDB is unavailable. The send form also falls back to the live wallet
+   * state, so a slow sync never delays recognizing one of the user's accounts.
+   */
+  private recordWalletAccounts(accounts: readonly WalletAccount[]): void {
+    const walletId = this.registry.selectedId;
+    if (!walletId) return;
+    void Promise.resolve(
+      this.rememberWalletAccounts(
+        walletId,
+        accounts.map(({ path, address, name }) => ({ path, address, name })),
+      ),
+    ).catch(() => undefined);
+  }
+
+  private forgetWalletAccountsSafely(walletId: string): void {
+    void Promise.resolve(this.forgetWalletAccounts(walletId)).catch(
+      () => undefined,
+    );
   }
 
   private updateState(

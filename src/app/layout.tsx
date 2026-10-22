@@ -1,10 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import { PwaRegister } from "@/components/pwa-register";
-import { ThemeScript } from "@/components/theme-script";
 import { WalletIdleLock } from "@/components/wallet-idle-lock";
 import { WalletUnloadLock } from "@/components/wallet-unload-lock";
-import { DEFAULT_THEME_MODE } from "@/lib/theme";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -31,23 +29,15 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
-  themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#f4f7f4" },
-    { media: "(prefers-color-scheme: dark)", color: "#0b1310" },
-  ],
+  themeColor: "#0b1310",
 };
 
 export default function RootLayout({
   children,
 }: Readonly<{ children: ReactNode }>) {
   return (
-    <html
-      data-theme={DEFAULT_THEME_MODE}
-      lang="en"
-      suppressHydrationWarning
-    >
+    <html data-theme="dark" lang="en">
       <body>
-        <ThemeScript />
         <PwaRegister />
         <WalletIdleLock />
         <WalletUnloadLock />

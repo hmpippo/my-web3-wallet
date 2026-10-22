@@ -10,29 +10,15 @@
     <title>Offline · My Wallet</title>
     <style>
       :root {
-        color-scheme: light;
-        --background: #f4f7f4;
-        --surface: #ffffff;
-        --foreground: #17221d;
-        --muted: #69766f;
-        --line: #e2e9e4;
-        --accent: #146b4b;
-        --accent-hover: #0f593e;
+        color-scheme: dark;
+        --background: #0b1310;
+        --surface: #121c17;
+        --foreground: #e7efe9;
+        --muted: #9cafa3;
+        --line: #26352c;
+        --accent: #1d7a55;
+        --accent-hover: #238c62;
         --on-accent: #ffffff;
-      }
-
-      @media (prefers-color-scheme: dark) {
-        :root {
-          color-scheme: dark;
-          --background: #0b1310;
-          --surface: #121c17;
-          --foreground: #e7efe9;
-          --muted: #9cafa3;
-          --line: #26352c;
-          --accent: #1d7a55;
-          --accent-hover: #238c62;
-          --on-accent: #ffffff;
-        }
       }
 
       * {
@@ -50,18 +36,10 @@
           max(1.25rem, env(safe-area-inset-left));
         place-items: center;
         background:
-          radial-gradient(ellipse at 80% 0%, #e5f2e9 0, transparent 36rem),
+          radial-gradient(ellipse at 80% 0%, #0f2a1e 0, transparent 36rem),
           var(--background);
         color: var(--foreground);
         font-family: Arial, Helvetica, sans-serif;
-      }
-
-      @media (prefers-color-scheme: dark) {
-        body {
-          background:
-            radial-gradient(ellipse at 80% 0%, #0f2a1e 0, transparent 36rem),
-            var(--background);
-        }
       }
 
       main {

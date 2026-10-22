@@ -2,7 +2,7 @@ import type { MetadataRoute } from "next";
 
 /**
  * Install metadata for the wallet. This is deliberately static: the installed
- * app shell does not depend on the user's current chain or theme.
+ * app shell does not depend on the user's current chain.
  */
 export default function manifest(): MetadataRoute.Manifest {
   return {

@@ -20,6 +20,7 @@ import {
 import { getChain, getExplorerTxUrl } from "@/core/chain";
 import { isUnusuallyHighFee } from "@/core/fees";
 import type { StoredWalletToken } from "@/core/storage";
+import { resolveAddressIdentity } from "@/core/address-book";
 import { truncateAddress } from "@/lib/address";
 import { useActiveChain } from "@/lib/use-active-chain";
 import {
@@ -28,6 +29,12 @@ import {
 } from "@/lib/recipient-input";
 import { CopyButton } from "@/components/copy-button";
 import { QrScannerDialog } from "@/components/qr-scanner-dialog";
+import { getNativeBalance } from "@/services/balance-service";
+import { getTokenBalance } from "@/services/token-service";
+import {
+  addressBookService,
+  getServerAddressBookState,
+} from "@/services/address-book-service";
 import {
   estimateErc20Transfer,
   estimateNativeTransfer,
@@ -66,6 +73,11 @@ export function SendForm() {
   );
   const searchParams = useSearchParams();
   const requestedToken = searchParams.get("token");
+  const addressBook = useSyncExternalStore(
+    addressBookService.subscribe,
+    addressBookService.getState,
+    getServerAddressBookState,
+  );
   const reviewRequestId = useRef(0);
   const sendInProgress = useRef(false);
   const recipientInputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -84,6 +96,14 @@ export function SendForm() {
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   const [renderedChainId, setRenderedChainId] = useState(chainId);
+  const [balanceSnapshot, setBalanceSnapshot] = useState<
+    | { key: string; status: "ready"; raw: bigint; formatted: string }
+    | { key: string; status: "error"; error: string }
+    | null
+  >(null);
+  const [maxError, setMaxError] = useState<string | null>(null);
+  const [isMaxBusy, setIsMaxBusy] = useState(false);
+  const [isRecipientEditing, setIsRecipientEditing] = useState(false);
 
   const requestedTokenMatch = requestedToken
     ? visibleTokens.find(
@@ -103,6 +123,68 @@ export function SendForm() {
   const assetValue = selectedToken ? selectedToken.address : NATIVE_ASSET;
   const assetSymbol = selectedToken ? selectedToken.symbol : native.symbol;
 
+  // Live accounts come first so a just-renamed account wins over a stale
+  // address-book copy from before the background sync finished.
+  const currentAccounts = useMemo(
+    () =>
+      walletState.accounts.map((account) => ({
+        walletId: walletState.selectedWalletId ?? "",
+        path: account.path,
+        address: account.address,
+        name: account.name,
+      })),
+    [walletState.accounts, walletState.selectedWalletId],
+  );
+
+  const recipientIdentity = useMemo(() => {
+    if (!to.trim()) return null;
+    let address: Address;
+    try {
+      address = parseRecipientInput(to, { chainId }).address;
+    } catch {
+      return null;
+    }
+    return resolveAddressIdentity(address, {
+      contacts: addressBook.contacts,
+      accounts: [...currentAccounts, ...addressBook.knownAccounts],
+      preferredWalletId: walletState.selectedWalletId,
+    });
+  }, [
+    to,
+    chainId,
+    addressBook.contacts,
+    addressBook.knownAccounts,
+    currentAccounts,
+    walletState.selectedWalletId,
+  ]);
+
+  // Matched identities replace the raw address while the field is idle. Focus
+  // reveals the raw value again so editing never operates on the label.
+  const recipientFieldValue =
+    !isRecipientEditing && recipientIdentity
+      ? `${recipientIdentity.name} (${truncateAddress(recipientIdentity.address)})`
+      : to;
+
+  // A snapshot is tied to the account/chain/asset it was read for, so a stale
+  // response can never be shown for a newly selected asset.
+  const balanceKey = selectedAddress
+    ? `${selectedAddress.toLowerCase()}:${chainId}:${assetValue}`
+    : null;
+  const balance =
+    balanceSnapshot &&
+    balanceSnapshot.key === balanceKey &&
+    balanceSnapshot.status === "ready"
+      ? balanceSnapshot
+      : null;
+  const balanceError =
+    balanceSnapshot &&
+    balanceSnapshot.key === balanceKey &&
+    balanceSnapshot.status === "error"
+      ? balanceSnapshot.error
+      : null;
+  const balanceLoading =
+    balanceKey !== null && balance === null && balanceError === null;
+
   // The active chain changed: a pending review, submission, or error from the
   // previous network no longer applies. Adjusting state during render (rather
   // than in an effect) avoids rendering once with stale values.
@@ -114,6 +196,7 @@ export function SendForm() {
     setIsBusy(false);
     setScannerOpen(false);
     setScanError(null);
+    setIsRecipientEditing(false);
   }
 
   useEffect(
@@ -122,6 +205,53 @@ export function SendForm() {
     },
     [],
   );
+
+  // Balance for the asset and account currently selected in the form. The
+  // snapshot carries its own key so a late response from a previous selection
+  // is ignored instead of overwriting the current one.
+  useEffect(() => {
+    if (!selectedAddress || !balanceKey) return;
+    let cancelled = false;
+    const key = balanceKey;
+    const request = selectedToken
+      ? getTokenBalance(selectedToken, selectedAddress, chainId).then(
+          (result) => ({ raw: result.raw, formatted: result.formatted }),
+        )
+      : getNativeBalance(selectedAddress, chainId).then((raw) => ({
+          raw,
+          formatted: formatUnits(raw, native.decimals),
+        }));
+
+    request
+      .then((result) => {
+        if (!cancelled) {
+          setBalanceSnapshot({ key, status: "ready", ...result });
+        }
+      })
+      .catch((caught: unknown) => {
+        if (cancelled) return;
+        setBalanceSnapshot({
+          key,
+          status: "error",
+          error:
+            caught instanceof Error
+              ? caught.message
+              : `Could not load the ${assetSymbol} balance.`,
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    selectedAddress,
+    balanceKey,
+    chainId,
+    selectedToken,
+    native.decimals,
+    assetSymbol,
+    submission,
+  ]);
 
   // The recipient field wraps on narrow screens. Height is set from the
   // content so a full address is visible without a horizontal scrollbar,
@@ -138,7 +268,7 @@ export function SendForm() {
     fitToContent();
     window.addEventListener("resize", fitToContent);
     return () => window.removeEventListener("resize", fitToContent);
-  }, [to]);
+  }, [recipientFieldValue]);
 
   function chainName(id: number): string {
     try {
@@ -199,6 +329,7 @@ export function SendForm() {
         setAmount(formatUnits(parsed.amount, decimals));
       }
       setTo(parsed.address);
+      setIsRecipientEditing(false);
       setReview(null);
       setSubmission(null);
       setError(null);
@@ -209,6 +340,68 @@ export function SendForm() {
     } catch (caught) {
       // Keep the scanner open so the user can simply try another code.
       setScanError(describeRecipientError(caught));
+    }
+  }
+
+  /**
+   * Fills the amount with everything that can actually be sent.
+   *
+   * ERC-20 transfers use the full token balance. Native transfers subtract the
+   * current maximum network fee, because filling the whole balance would create
+   * a transfer that is guaranteed to fail on fees.
+   */
+  async function fillMaxAmount() {
+    if (
+      !balance ||
+      balance.raw <= BigInt(0) ||
+      !selectedAddress ||
+      isBusy ||
+      isMaxBusy
+    ) {
+      return;
+    }
+    setIsMaxBusy(true);
+    setMaxError(null);
+    setError(null);
+    setReview(null);
+    setSubmission(null);
+    reviewRequestId.current += 1;
+
+    try {
+      let raw = balance.raw;
+      const decimals = selectedToken ? selectedToken.decimals : native.decimals;
+
+      if (!selectedToken) {
+        let recipient = selectedAddress;
+        try {
+          recipient = parseRecipientInput(to, { chainId }).address;
+        } catch {
+          // The field is empty or incomplete: estimate against a self-transfer
+          // so Max still works before the recipient is entered.
+        }
+        const estimate = await estimateNativeTransfer({
+          from: selectedAddress,
+          to: recipient,
+          value: BigInt(1),
+          chainId,
+        });
+        raw =
+          balance.raw > estimate.maxTotalFee
+            ? balance.raw - estimate.maxTotalFee
+            : BigInt(0);
+        if (raw <= BigInt(0)) {
+          setMaxError(`Not enough ${native.symbol} to cover the network fee.`);
+          return;
+        }
+      }
+
+      setAmount(formatUnits(raw, decimals));
+    } catch {
+      setMaxError(
+        "Could not estimate the network fee. Enter an amount manually.",
+      );
+    } finally {
+      setIsMaxBusy(false);
     }
   }
 
@@ -326,6 +519,7 @@ export function SendForm() {
       setReview(null);
       setAmount("");
       setTo("");
+      setIsRecipientEditing(false);
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -380,6 +574,7 @@ export function SendForm() {
                 reviewRequestId.current += 1;
                 setAssetId(event.target.value);
                 setScanError(null);
+                setMaxError(null);
                 setReview(null);
                 setIsBusy(false);
               }}
@@ -414,6 +609,15 @@ export function SendForm() {
                   setReview(null);
                   setIsBusy(false);
                 }}
+                onFocus={(event) => {
+                  if (isRecipientEditing) return;
+                  const field = event.currentTarget;
+                  setIsRecipientEditing(true);
+                  if (recipientIdentity) {
+                    window.requestAnimationFrame(() => field.select());
+                  }
+                }}
+                onBlur={() => setIsRecipientEditing(false)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
@@ -425,7 +629,8 @@ export function SendForm() {
                 required
                 rows={1}
                 spellCheck={false}
-                value={to}
+                title={recipientIdentity?.address ?? to}
+                value={recipientFieldValue}
               />
               <button
                 aria-label="Scan recipient QR code"
@@ -447,14 +652,16 @@ export function SendForm() {
               fill in the amount and token for you.
             </span>
           </label>
-          <label>
-            Amount ({assetSymbol})
+          <div className="send-amount-field">
+            <label htmlFor="send-amount">Amount ({assetSymbol})</label>
             <input
+              id="send-amount"
               inputMode="decimal"
               onChange={(event) => {
                 reviewRequestId.current += 1;
                 setAmount(event.target.value);
                 setReview(null);
+                setMaxError(null);
                 setIsBusy(false);
               }}
               disabled={isBusy}
@@ -463,7 +670,43 @@ export function SendForm() {
               type="text"
               value={amount}
             />
-          </label>
+            <div className="send-amount-meta">
+              <span className="field-help">
+                {balanceLoading
+                  ? `Loading ${assetSymbol} balance...`
+                  : balance
+                    ? `${balance.formatted} ${assetSymbol} available`
+                    : balanceError
+                      ? "Balance unavailable"
+                      : ""}
+              </span>
+              <button
+                aria-label={`Use maximum available ${assetSymbol}`}
+                className="send-max-button"
+                disabled={
+                  !balance ||
+                  balance.raw === BigInt(0) ||
+                  balanceLoading ||
+                  isBusy ||
+                  isMaxBusy
+                }
+                onClick={() => void fillMaxAmount()}
+                type="button"
+              >
+                {isMaxBusy ? "..." : "Max"}
+              </button>
+            </div>
+            {balanceError ? (
+              <span className="field-help send-balance-error">
+                {balanceError}
+              </span>
+            ) : null}
+            {maxError ? (
+              <span className="field-help send-max-error" role="alert">
+                {maxError}
+              </span>
+            ) : null}
+          </div>
           {!review && (
             <button
               className="button button-primary"

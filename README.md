@@ -31,8 +31,9 @@ Open [http://localhost:3000](http://localhost:3000) to view the app.
 - `src/core/storage.ts` — encrypted vault, biometric unlock vault, and public account metadata storage
 - `src/core/chain.ts` — supported-chain registry, per-chain RPC resolution, and cached viem public clients
 - `src/core/fees.ts` — EIP-1559 fee validation, hard caps, and high-fee warning thresholds
+- `src/core/address-book.ts` — contact validation and recipient-name resolution
 - `src/services/chain-service.ts` — persisted active-chain store for the network switcher
-- `src/services/theme-service.ts` — persisted light/dark/system theme store
+- `src/services/address-book-service.ts` — device-wide contacts and implicit wallet-account labels
 - `src/services/wallet-service.ts` — create, import, unlock (password or biometric), lock, and send lifecycle
 - `src/services/transaction-service.ts` — EIP-1559 fee-capped native and token transfers with viem
 - `src/services/balance-service.ts` — native balance reads for the active chain
@@ -44,11 +45,11 @@ Open [http://localhost:3000](http://localhost:3000) to view the app.
 - `src/app/api/transactions/route.ts` — validated same-origin history endpoint
 - `src/lib/address.ts` — address truncation for display
 - `src/lib/recipient-input.ts` — recipient parsing for typed, pasted, and scanned addresses and EIP-681 payment links
-- `src/lib/theme.ts` — theme-mode validation and light/dark resolution
 - `src/lib/base64.ts` — shared base64 and base64url helpers for vaults and credentials
 - `src/lib/clipboard.ts` — clipboard writes with an `execCommand` fallback
 - `src/lib/use-active-chain.ts` — React hook that subscribes to the persisted active-chain store
 - `src/components/qr-scanner-dialog.tsx` — local camera QR scanner used by the Send form
+- `src/components/address-book-dialog.tsx` — contact manager opened from the header settings
 - `src/types/transaction-history.ts` — shared transaction-history types
 
 Wallet creation displays a recovery phrase before asking the user to confirm
@@ -180,16 +181,38 @@ or 0.01 native. The RPC still chooses the base-fee proposal and gas estimate
 within those bounds, and OP/Base L1 data fees are charged in addition to the
 displayed execution fee.
 
+## Address book
+
+Settings → Address book manages a device-wide list of named contacts. Contacts
+are public metadata, so they are stored unencrypted in IndexedDB
+(`wallet_address_book_contacts_v1`); no key material ever reaches them. Adding
+a contact validates the address checksum, and names are editable while the
+address itself stays immutable.
+
+The accounts of every wallet that has been unlocked on this device are recorded
+implicitly in `wallet_known_accounts_v1`, including hidden accounts and
+imported private-key accounts. They are not listed in the contact manager, but
+the send form recognizes them: when a typed, pasted, or scanned recipient
+matches a contact or one of your accounts, the recipient field shows the name
+and shortened address instead of the raw value. Focusing the field reveals the
+raw address for editing. An explicit contact name wins over an implicit account
+label, and the selected wallet's label wins when the same address exists in
+more than one wallet. Because only an unlocked wallet exposes its addresses,
+another wallet's accounts become recognizable after its first unlock on this
+device.
+
 ## Appearance
 
-The header's theme menu switches the whole app between light, dark, and
-follow-system. The choice is a display-only preference stored in
-`wallet_theme_v1` and defaults to dark; like the network selection it never
-touches keys or the vault, and it is kept across locks and reloads. System mode
-follows the OS `prefers-color-scheme` setting live and updates when another tab
-changes the preference. A tiny inline script applies the stored palette before
-the first paint, so a user who chose light does not see a flash of the dark
-theme while the app hydrates.
+The app ships one dark palette. There is no theme preference or light-mode
+fallback, and every page renders with `data-theme="dark"` from the server
+markup onward.
+
+## Send form
+
+The amount field shows the selected asset's available balance. `Max` fills an
+ERC-20 transfer with the full token balance and a native transfer with the
+balance minus the current maximum network fee, so the resulting transfer can
+still pay for gas.
 
 ## Installable app (PWA)
 

@@ -1,61 +1,8 @@
 @import "tailwindcss";
 
+/* The wallet ships one palette: dark. There is no theme preference or
+   light-mode fallback, so every token lives on the root element. */
 :root {
-  color-scheme: light;
-  --background: #f4f7f4;
-  --surface: #ffffff;
-  --surface-muted: #fbfcfb;
-  --surface-soft: #eef2ef;
-  --surface-hover: #f8fbf9;
-  --surface-hover-strong: #f1f5f2;
-  --input-bg: #f8faf8;
-  --foreground: #17221d;
-  --muted: #69766f;
-  --line: #e2e9e4;
-  --line-strong: #a7beb0;
-  --disabled: #8a958e;
-  --disabled-solid: #9aa99f;
-  --placeholder: #a3ada6;
-  --accent: #146b4b;
-  --accent-solid: #146b4b;
-  --accent-solid-hover: #0f593e;
-  --accent-soft: #e6f3eb;
-  --accent-soft-hover: #d7ebdf;
-  --on-accent: #ffffff;
-  --glow: #e5f2e9;
-  --switch-track: #cdd6d0;
-  --header-line: rgb(23 34 29 / 8%);
-  --control-line: rgb(23 34 29 / 12%);
-  --glass: rgb(255 255 255 / 60%);
-  --overlay: rgb(251 252 251 / 55%);
-  --overlay-hover: rgb(251 252 251 / 35%);
-  --backdrop: rgb(13 24 17 / 58%);
-  --shadow-soft: rgb(27 54 39 / 5%);
-  --shadow-medium: rgb(27 54 39 / 12%);
-  --shadow-strong: rgb(27 54 39 / 30%);
-  --shadow-modal: rgb(0 0 0 / 24%);
-  --focus-ring: rgb(20 107 75 / 12%);
-  --focus-ring-strong: rgb(20 107 75 / 25%);
-  --status-amber: #d39c43;
-  --status-green: #39946c;
-  --danger: #8b3020;
-  --danger-bg: #fff7f4;
-  --danger-line: #f0d1ca;
-  --danger-soft: #fbeceb;
-  --warning: #8a5a12;
-  --warning-strong: #6f470c;
-  --warning-bg: #fdf3e3;
-  --warning-line: #f0d5b4;
-  --warning-line-strong: #d8b57e;
-  --warning-hover-bg: #fffaf0;
-  --success: #286b48;
-  --success-strong: #205c3e;
-  --success-bg: #f1faf4;
-  --success-line: #cfe5d7;
-  --success-soft: #edf5ef;
-}
-
-:root[data-theme="dark"] {
   color-scheme: dark;
   --background: #0b1310;
   --surface: #121c17;
@@ -275,6 +222,30 @@ input {
 }
 
 .button-outline:disabled {
+  color: var(--disabled);
+  cursor: not-allowed;
+}
+
+.button-compact {
+  min-height: 2rem;
+  border-radius: 0.5rem;
+  padding: 0 0.65rem;
+  font-size: 0.72rem;
+}
+
+.button-danger {
+  background: var(--danger);
+  color: var(--danger-bg);
+  cursor: pointer;
+  text-align: center;
+}
+
+.button-danger:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.button-danger:disabled {
+  background: var(--disabled-solid);
   color: var(--disabled);
   cursor: not-allowed;
 }
@@ -770,44 +741,15 @@ input {
   white-space: nowrap;
 }
 
-.dashboard-heading .eyebrow {
-  margin-bottom: 0.55rem;
-}
-
 .dashboard-heading h1 {
   margin: 0;
+  overflow-wrap: anywhere;
   font-size: clamp(2.25rem, 7vw, 3.5rem);
   letter-spacing: -0.07em;
 }
 
 .balance-card {
   max-width: 680px;
-}
-
-.balance-topline {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-.network-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.45rem;
-  border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent);
-  padding: 0.45rem 0.65rem;
-  font-size: 0.72rem;
-  font-weight: 700;
-  white-space: nowrap;
-}
-
-.network-label .status-dot {
-  width: 0.4rem;
-  height: 0.4rem;
-  background: var(--status-green);
 }
 
 .account-controls {
@@ -1497,13 +1439,9 @@ input {
   text-transform: uppercase;
 }
 
-.theme-options {
-  display: grid;
-  gap: 0.15rem;
-}
-
-.theme-option {
+.settings-menu-item {
   display: flex;
+  width: 100%;
   align-items: center;
   gap: 0.6rem;
   border: 0;
@@ -1518,45 +1456,218 @@ input {
   text-align: left;
 }
 
-.theme-option:hover {
+.settings-menu-item:hover {
   background: var(--surface-hover-strong);
 }
 
-.theme-option:focus-visible {
+.settings-menu-item:focus-visible {
   outline: 3px solid var(--focus-ring);
   outline-offset: 1px;
 }
 
-.theme-option[aria-checked="true"] {
-  color: var(--accent);
-}
-
-.theme-option-icon {
-  display: inline-flex;
-  flex: 0 0 auto;
+.settings-menu-item svg {
   width: 1rem;
   height: 1rem;
+  flex: 0 0 auto;
   color: var(--muted);
 }
 
-.theme-option[aria-checked="true"] .theme-option-icon {
-  color: var(--accent);
-}
-
-.theme-option-icon svg {
-  width: 100%;
-  height: 100%;
-}
-
-.theme-option-check {
-  display: inline-flex;
+.settings-menu-item .settings-menu-chevron {
   margin-left: auto;
-  color: var(--accent);
 }
 
-.theme-option-check svg {
-  width: 0.95rem;
-  height: 0.95rem;
+/* --- Address book dialog --- */
+
+.address-book-backdrop {
+  position: fixed;
+  z-index: 60;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  overflow-y: auto;
+  background: var(--backdrop);
+  padding: 1.25rem;
+}
+
+.address-book-dialog {
+  width: min(100%, 32rem);
+  max-height: min(90vh, 46rem);
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: var(--surface);
+  padding: 1.5rem;
+  box-shadow: 0 1.5rem 4rem var(--shadow-modal);
+}
+
+.address-book-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.address-book-heading h2 {
+  margin: 0;
+  font-size: 1.25rem;
+  letter-spacing: -0.04em;
+}
+
+.address-book-heading p {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+  line-height: 1.55;
+}
+
+.address-book-close {
+  display: grid;
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 0.55rem;
+  background: var(--surface);
+  color: var(--foreground);
+  cursor: pointer;
+  padding: 0;
+}
+
+.address-book-close:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--surface-hover);
+}
+
+.address-book-close:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.address-book-close svg {
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+.address-book-form {
+  display: grid;
+  gap: 0.8rem;
+  margin-top: 1.2rem;
+}
+
+.address-book-form label {
+  display: grid;
+  gap: 0.4rem;
+  color: var(--foreground);
+  font-size: 0.83rem;
+  font-weight: 700;
+}
+
+.address-book-form input,
+.address-book-edit input {
+  width: 100%;
+  min-height: 2.8rem;
+  border: 1px solid var(--line);
+  border-radius: 0.6rem;
+  background: var(--input-bg);
+  padding: 0 0.8rem;
+  color: var(--foreground);
+  font: inherit;
+  font-size: 0.85rem;
+}
+
+.address-book-form input:focus,
+.address-book-edit input:focus {
+  border-color: var(--accent);
+  outline: 3px solid var(--focus-ring);
+}
+
+.address-book-form input:disabled,
+.address-book-edit input:disabled {
+  cursor: not-allowed;
+}
+
+.address-book-form .button {
+  justify-self: start;
+}
+
+.address-book-list-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 1.35rem;
+  border-top: 1px solid var(--line);
+  padding-top: 1rem;
+}
+
+.address-book-list-heading h3 {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.address-book-list-heading span {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.address-book-empty {
+  margin: 0.8rem 0 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.address-book-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.address-book-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--line);
+  padding: 0.7rem 0;
+}
+
+.address-book-identity {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 0.1rem;
+}
+
+.address-book-item-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.address-book-confirm {
+  color: var(--danger);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.address-book-edit {
+  display: grid;
+  flex: 1 1 auto;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.address-book-edit .address-book-item-actions {
+  justify-content: flex-start;
 }
 
 .overflow-menu-item-danger {
@@ -2308,11 +2419,6 @@ input {
     padding: 0 0.7rem;
   }
 
-  .balance-topline {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
   .account-management-row {
     align-items: start;
   }
@@ -2896,10 +3002,6 @@ input {
 /* --- Standalone PWA safe areas --- */
 
 :root {
-  --status-bar-bg: #146b4b;
-}
-
-:root[data-theme="dark"] {
   --status-bar-bg: #0b1310;
 }
 
@@ -2917,7 +3019,7 @@ input {
 
   /*
     iOS uses white status-bar text with black-translucent. Paint the inset so
-    the text has a readable background in both themes.
+    the text has a readable background.
   */
   body::before {
     position: fixed;
@@ -3195,6 +3297,60 @@ input {
   font-size: 0.78rem;
 }
 
+/* --- Available balance and Max --- */
+
+.send-amount-field {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.send-amount-field > label {
+  color: var(--foreground);
+  font-size: 0.83rem;
+  font-weight: 700;
+}
+
+.send-amount-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.send-max-button {
+  flex: 0 0 auto;
+  border: 1px solid var(--line-strong);
+  border-radius: 0.45rem;
+  background: var(--surface);
+  padding: 0.2rem 0.65rem;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.send-max-button:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.send-max-button:focus-visible {
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+.send-max-button:disabled {
+  border-color: var(--line);
+  color: var(--disabled);
+  cursor: not-allowed;
+}
+
+.send-balance-error,
+.send-max-error {
+  color: var(--danger);
+}
+
 /* --- Phone adaptation --- */
 
 @media (max-width: 640px) {
@@ -3270,6 +3426,21 @@ input {
     display: none;
   }
 
+  .address-book-dialog {
+    padding: 1.15rem;
+  }
+
+  .address-book-item {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.55rem;
+  }
+
+  .address-book-item-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
   .portfolio-tab,
   .history-tab {
     min-height: 2.75rem;
@@ -3283,7 +3454,7 @@ input {
 @media (max-width: 400px) {
   /*
     Just above the point where the wordmark is hidden, the brand and the
-    network/theme controls only have a few pixels between them. Tighten both
+    network/settings controls only have a few pixels between them. Tighten both
     gaps so the header never becomes a single unbroken strip.
   */
   .brand {
