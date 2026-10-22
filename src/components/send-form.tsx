@@ -104,6 +104,7 @@ export function SendForm() {
   const [maxError, setMaxError] = useState<string | null>(null);
   const [isMaxBusy, setIsMaxBusy] = useState(false);
   const [isRecipientEditing, setIsRecipientEditing] = useState(false);
+  const [recipientError, setRecipientError] = useState<string | null>(null);
 
   const requestedTokenMatch = requestedToken
     ? visibleTokens.find(
@@ -197,6 +198,7 @@ export function SendForm() {
     setScannerOpen(false);
     setScanError(null);
     setIsRecipientEditing(false);
+    setRecipientError(null);
   }
 
   useEffect(
@@ -315,6 +317,16 @@ export function SendForm() {
     return { address: parsed.address, amount: parsed.amount, token };
   }
 
+  /** Returns an inline validation message, or null for an acceptable value. */
+  function recipientValidationMessage(raw: string): string | null {
+    try {
+      resolveRecipient(raw);
+      return null;
+    } catch (caught) {
+      return describeRecipientError(caught);
+    }
+  }
+
   function handleScan(raw: string) {
     try {
       const parsed = resolveRecipient(raw);
@@ -330,6 +342,7 @@ export function SendForm() {
       }
       setTo(parsed.address);
       setIsRecipientEditing(false);
+      setRecipientError(null);
       setReview(null);
       setSubmission(null);
       setError(null);
@@ -407,6 +420,20 @@ export function SendForm() {
 
   async function reviewTransfer(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const recipientProblem = to.trim()
+      ? recipientValidationMessage(to)
+      : "Enter or scan a wallet address.";
+    if (recipientProblem) {
+      reviewRequestId.current += 1;
+      setRecipientError(recipientProblem);
+      setError(null);
+      setReview(null);
+      setSubmission(null);
+      setIsBusy(false);
+      recipientInputRef.current?.focus();
+      return;
+    }
+    setRecipientError(null);
     setError(null);
     setReview(null);
     setSubmission(null);
@@ -421,7 +448,10 @@ export function SendForm() {
       try {
         parsedRecipient = resolveRecipient(to);
       } catch (caught) {
-        throw new Error(describeRecipientError(caught));
+        if (requestId === reviewRequestId.current) {
+          setRecipientError(describeRecipientError(caught));
+        }
+        return;
       }
       if (
         parsedRecipient.token &&
@@ -520,6 +550,7 @@ export function SendForm() {
       setAmount("");
       setTo("");
       setIsRecipientEditing(false);
+      setRecipientError(null);
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -597,14 +628,19 @@ export function SendForm() {
             Recipient address
             <span className="recipient-field">
               <textarea
+                aria-describedby="send-recipient-help"
+                aria-invalid={recipientError ? true : undefined}
                 aria-label="Recipient address"
                 autoComplete="off"
+                className={recipientError ? "recipient-input-invalid" : undefined}
                 disabled={isBusy}
+                id="send-recipient"
                 onChange={(event) => {
                   reviewRequestId.current += 1;
                   // Addresses and payment links are single-line values; a
                   // stray line break from the keyboard must not end up in one.
                   setTo(event.target.value.replace(/[\r\n]+/g, ""));
+                  setRecipientError(null);
                   setScanError(null);
                   setReview(null);
                   setIsBusy(false);
@@ -617,7 +653,12 @@ export function SendForm() {
                     window.requestAnimationFrame(() => field.select());
                   }
                 }}
-                onBlur={() => setIsRecipientEditing(false)}
+                onBlur={() => {
+                  setIsRecipientEditing(false);
+                  if (to.trim()) {
+                    setRecipientError(recipientValidationMessage(to));
+                  }
+                }}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
@@ -647,9 +688,13 @@ export function SendForm() {
                 <span className="recipient-scan-label">Scan</span>
               </button>
             </span>
-            <span className="field-help">
-              Type or paste an address, or scan a wallet QR code. Payment links
-              fill in the amount and token for you.
+            <span
+              className={`field-help${recipientError ? " send-recipient-error" : ""}`}
+              id="send-recipient-help"
+              role={recipientError ? "alert" : undefined}
+            >
+              {recipientError ??
+                "Type or paste an address, or scan a wallet QR code. Payment links fill in the amount and token for you."}
             </span>
           </label>
           <div className="send-amount-field">

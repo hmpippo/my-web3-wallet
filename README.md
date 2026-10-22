@@ -183,11 +183,13 @@ displayed execution fee.
 
 ## Address book
 
-Settings → Address book manages a device-wide list of named contacts. Contacts
-are public metadata, so they are stored unencrypted in IndexedDB
-(`wallet_address_book_contacts_v1`); no key material ever reaches them. Adding
-a contact validates the address checksum, and names are editable while the
-address itself stays immutable.
+Settings → Address book manages a device-wide list of named contacts. The
+dialog opens on the contact list; the centered Add contact button at the bottom
+switches to a separate add-contact view. The wallet address can be typed,
+pasted, or scanned from a QR code. Contacts are public metadata, so they are
+stored unencrypted in IndexedDB (`wallet_address_book_contacts_v1`); no key
+material ever reaches them. Adding a contact validates the address checksum,
+and names are editable while the address itself stays immutable.
 
 The accounts of every wallet that has been unlocked on this device are recorded
 implicitly in `wallet_known_accounts_v1`, including hidden accounts and
@@ -208,6 +210,10 @@ fallback, and every page renders with `data-theme="dark"` from the server
 markup onward.
 
 ## Send form
+
+The recipient is validated when the field loses focus and again before review.
+Malformed addresses, checksum failures, and unsupported payment links are shown
+inline under the field.
 
 The amount field shows the selected asset's available balance. `Max` fills an
 ERC-20 transfer with the full token balance and a native transfer with the

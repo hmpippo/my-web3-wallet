@@ -10,6 +10,8 @@ interface QrScannerDialogProps {
   onScan: (value: string) => void;
   /** Validation message shown inside the dialog while scanning continues. */
   errorMessage?: string | null;
+  /** Dialog heading. Defaults to the send-form wording. */
+  title?: string;
 }
 
 type CameraStatus = "starting" | "scanning" | "error";
@@ -30,6 +32,7 @@ export function QrScannerDialog({
   onClose,
   onScan,
   errorMessage,
+  title = "Scan recipient QR code",
 }: QrScannerDialogProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -245,7 +248,7 @@ export function QrScannerDialog({
         role="dialog"
       >
         <div className="scanner-header">
-          <h2 id="scanner-heading">Scan recipient QR code</h2>
+          <h2 id="scanner-heading">{title}</h2>
           <button
             aria-label="Close QR scanner"
             className="scanner-close"

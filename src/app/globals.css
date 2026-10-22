@@ -1507,17 +1507,49 @@ input {
   gap: 1rem;
 }
 
+.address-book-heading-copy {
+  min-width: 0;
+}
+
+.address-book-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin: 0 0 0.55rem;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0;
+  font: inherit;
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.address-book-back:hover:not(:disabled) {
+  color: var(--foreground);
+}
+
+.address-book-back:focus-visible {
+  border-radius: 0.25rem;
+  outline: 3px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.address-book-back:disabled {
+  color: var(--disabled);
+  cursor: not-allowed;
+}
+
+.address-book-back svg {
+  width: 0.8rem;
+  height: 0.8rem;
+}
+
 .address-book-heading h2 {
   margin: 0;
   font-size: 1.25rem;
   letter-spacing: -0.04em;
-}
-
-.address-book-heading p {
-  margin: 0.35rem 0 0;
-  color: var(--muted);
-  font-size: 0.85rem;
-  line-height: 1.55;
 }
 
 .address-book-close {
@@ -1585,6 +1617,19 @@ input {
 .address-book-form input:disabled,
 .address-book-edit input:disabled {
   cursor: not-allowed;
+}
+
+.address-book-address-field {
+  display: flex;
+  align-items: stretch;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.address-book-address-field input {
+  width: auto;
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .address-book-form .button {
@@ -1668,6 +1713,24 @@ input {
 
 .address-book-edit .address-book-item-actions {
   justify-content: flex-start;
+}
+
+.address-book-footer {
+  display: flex;
+  justify-content: center;
+  margin-top: 1.1rem;
+  border-top: 1px solid var(--line);
+  padding-top: 1rem;
+}
+
+.address-book-add {
+  min-width: 10rem;
+  gap: 0.4rem;
+}
+
+.address-book-add svg {
+  width: 0.85rem;
+  height: 0.85rem;
 }
 
 .overflow-menu-item-danger {
@@ -3281,6 +3344,15 @@ input {
   outline: 3px solid var(--focus-ring);
 }
 
+.recipient-field textarea.recipient-input-invalid {
+  border-color: var(--danger-line);
+}
+
+.recipient-field textarea.recipient-input-invalid:focus {
+  border-color: var(--danger);
+  outline-color: var(--danger-line);
+}
+
 .recipient-field textarea:disabled {
   cursor: not-allowed;
 }
@@ -3346,6 +3418,7 @@ input {
   cursor: not-allowed;
 }
 
+.send-recipient-error,
 .send-balance-error,
 .send-max-error {
   color: var(--danger);
