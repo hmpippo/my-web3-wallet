@@ -278,7 +278,7 @@ export function AddressBookDialog({
                 />
                 <button
                   aria-label="Scan wallet address QR code"
-                  className="recipient-scan-button"
+                  className="recipient-scan-button address-book-icon-button"
                   disabled={!isReady || isBusy}
                   onClick={() => {
                     setScanError(null);
@@ -288,7 +288,6 @@ export function AddressBookDialog({
                   type="button"
                 >
                   <ScanIcon />
-                  <span className="recipient-scan-label">Scan</span>
                 </button>
               </span>
             </label>

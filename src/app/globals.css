@@ -1632,6 +1632,13 @@ input {
   min-width: 0;
 }
 
+.address-book-icon-button {
+  width: 2.8rem;
+  min-width: 2.8rem;
+  justify-content: center;
+  padding: 0;
+}
+
 .address-book-form .button {
   justify-self: start;
 }
@@ -1731,6 +1738,120 @@ input {
 .address-book-add svg {
   width: 0.85rem;
   height: 0.85rem;
+}
+
+.address-picker-backdrop {
+  position: fixed;
+  z-index: 40;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  overflow-y: auto;
+  background: var(--backdrop);
+  padding: 1.25rem;
+}
+
+.address-picker-panel {
+  width: min(100%, 30rem);
+  max-height: min(85vh, 42rem);
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: var(--surface);
+  padding: 1.25rem;
+  box-shadow: 0 1.5rem 4rem var(--shadow-modal);
+}
+
+.address-picker-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.address-picker-header h2 {
+  margin: 0;
+  font-size: 1.1rem;
+  letter-spacing: -0.03em;
+}
+
+.address-picker-body {
+  display: grid;
+  gap: 1.1rem;
+  margin-top: 1rem;
+}
+
+.address-picker-group {
+  min-width: 0;
+}
+
+.address-picker-group h3 {
+  margin: 0 0 0.35rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.address-picker-subgroup {
+  margin-top: 0.55rem;
+}
+
+.address-picker-subgroup h4 {
+  margin: 0 0 0.15rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.address-picker-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.address-picker-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  padding: 0.65rem 0.1rem;
+  color: var(--foreground);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.address-picker-row:hover {
+  background: var(--surface-hover);
+}
+
+.address-picker-row:focus-visible {
+  border-radius: 0.35rem;
+  outline: 3px solid var(--focus-ring);
+  outline-offset: -2px;
+}
+
+.address-picker-row-copy {
+  display: grid;
+  min-width: 0;
+  gap: 0.1rem;
+}
+
+.address-picker-row-copy strong {
+  font-size: 0.84rem;
+}
+
+.address-picker-row-copy code {
+  color: var(--muted);
+  font-size: 0.72rem;
+  overflow-wrap: anywhere;
 }
 
 .overflow-menu-item-danger {
@@ -3499,7 +3620,8 @@ input {
     display: none;
   }
 
-  .address-book-dialog {
+  .address-book-dialog,
+  .address-picker-panel {
     padding: 1.15rem;
   }
 

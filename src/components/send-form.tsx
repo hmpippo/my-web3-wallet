@@ -29,6 +29,7 @@ import {
 } from "@/lib/recipient-input";
 import { CopyButton } from "@/components/copy-button";
 import { QrScannerDialog } from "@/components/qr-scanner-dialog";
+import { AddressBookPicker } from "@/components/address-book-picker";
 import { getNativeBalance } from "@/services/balance-service";
 import { getTokenBalance } from "@/services/token-service";
 import {
@@ -105,6 +106,8 @@ export function SendForm() {
   const [isMaxBusy, setIsMaxBusy] = useState(false);
   const [isRecipientEditing, setIsRecipientEditing] = useState(false);
   const [recipientError, setRecipientError] = useState<string | null>(null);
+  const [addressPickerOpen, setAddressPickerOpen] = useState(false);
+  const addressPickerButtonRef = useRef<HTMLButtonElement>(null);
 
   const requestedTokenMatch = requestedToken
     ? visibleTokens.find(
@@ -674,8 +677,21 @@ export function SendForm() {
                 value={recipientFieldValue}
               />
               <button
+                aria-expanded={addressPickerOpen}
+                aria-haspopup="dialog"
+                aria-label="Choose address from address book"
+                className="recipient-scan-button address-book-icon-button"
+                disabled={isBusy}
+                onClick={() => setAddressPickerOpen(true)}
+                ref={addressPickerButtonRef}
+                title="Choose from address book"
+                type="button"
+              >
+                <BookIcon />
+              </button>
+              <button
                 aria-label="Scan recipient QR code"
-                className="recipient-scan-button"
+                className="recipient-scan-button address-book-icon-button"
                 disabled={isBusy}
                 onClick={() => {
                   setScanError(null);
@@ -685,7 +701,6 @@ export function SendForm() {
                 type="button"
               >
                 <ScanIcon />
-                <span className="recipient-scan-label">Scan</span>
               </button>
             </span>
             <span
@@ -898,7 +913,39 @@ export function SendForm() {
           onScan={handleScan}
         />
       ) : null}
+      <AddressBookPicker
+        open={addressPickerOpen}
+        onClose={() => setAddressPickerOpen(false)}
+        onSelect={(address) => {
+          setTo(address);
+          setRecipientError(null);
+          setScanError(null);
+          setReview(null);
+          setSubmission(null);
+          setIsBusy(false);
+          setAddressPickerOpen(false);
+        }}
+        returnFocusRef={addressPickerButtonRef}
+      />
     </main>
+  );
+}
+
+/** Open book icon for the address book picker. */
+function BookIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.6"
+      viewBox="0 0 16 16"
+    >
+      <path d="M2.5 3.4c1.9-.3 3.7.1 5.5 1.3 1.8-1.2 3.6-1.6 5.5-1.3v9c-1.9-.3-3.7.1-5.5 1.3-1.8-1.2-3.6-1.6-5.5-1.3v-9Z" />
+      <path d="M8 4.7v9" />
+    </svg>
   );
 }
 
